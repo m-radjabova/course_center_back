@@ -80,7 +80,7 @@ class ShopService:
                 values.append(address)
             
             if not updates:
-                return {"success": False, "message": "Yangilash uchun ma'lumot yo'q"}
+                return {"success": False, "message": "No fields to update"}
             
             values.append(shop_id)
             query = f"UPDATE shop SET {', '.join(updates)} WHERE shop_id = %s"
