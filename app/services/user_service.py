@@ -1,5 +1,6 @@
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
+from uuid import UUID
 
 from app.core.security import hash_password, verify_password
 from app.models.user import User
@@ -10,15 +11,22 @@ def check_email(db: Session, email: str) -> bool:
     return db.query(User).filter(User.email == email).first() is not None
 
 
+def check_name(db: Session, name: str) -> bool:
+    return db.query(User).filter(User.name == name).first() is not None
+
+
 def create_user(db: Session, user: UserCreate):
     if check_email(db, user.email):
         raise HTTPException(status_code=400, detail="Email already registered")
 
+    if check_name(db, user.name):
+        raise HTTPException(status_code=400, detail="Name already taken")
+
     new_user = User(
         email=user.email,
-        username=user.username,
+        name=user.name,
         hashed_password=hash_password(user.password),
-        role=user.role if hasattr(user, "role") else "user"
+        roles=["user"],
     )
     db.add(new_user)
     db.commit()
@@ -26,13 +34,14 @@ def create_user(db: Session, user: UserCreate):
     return new_user
 
 
-
-def authenticate_user(db: Session, username: str, password: str) -> User | None:
-    user = db.query(User).filter(User.username == username).first()
+def authenticate_user(db: Session, email: str, password: str):
+    user = db.query(User).filter(User.email == email).first()
     if not user:
         return None
+
     if not verify_password(password, user.hashed_password):
         return None
+
     return user
 
 
@@ -47,16 +56,27 @@ def get_users(db: Session):
     return db.query(User).all()
 
 
-def get_user_by_id(db: Session, user_id: int):
+def get_user_by_id(db: Session, user_id: UUID):
     return db.query(User).filter(User.id == user_id).first()
 
 
-def update_user(db: Session, user_id: int, user_data: UserUpdate):
+def update_user(db: Session, user_id: UUID, user_data: UserUpdate):
     db_user = get_user_by_id(db, user_id)
     if not db_user:
         raise HTTPException(status_code=404, detail="User not found")
 
     update_data = user_data.model_dump(exclude_unset=True)
+
+    # email unique check
+    if "email" in update_data and update_data["email"] != db_user.email:
+        if check_email(db, update_data["email"]):
+            raise HTTPException(status_code=400, detail="Email already registered")
+
+    # name unique check
+    if "name" in update_data and update_data["name"] != db_user.name:
+        if check_name(db, update_data["name"]):
+            raise HTTPException(status_code=400, detail="Name already taken")
+
     for key, value in update_data.items():
         if key == "password":
             db_user.hashed_password = hash_password(value)
@@ -68,7 +88,18 @@ def update_user(db: Session, user_id: int, user_data: UserUpdate):
     return db_user
 
 
-def delete_user(db: Session, user_id: int):
+def update_user_roles(db: Session, user_id: UUID, roles: list[str]):
+    db_user = get_user_by_id(db, user_id)
+    if not db_user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    db_user.roles = roles
+    db.commit()
+    db.refresh(db_user)
+    return db_user
+
+
+def delete_user(db: Session, user_id: UUID):
     db_user = get_user_by_id(db, user_id)
     if not db_user:
         raise HTTPException(status_code=404, detail="User not found")

@@ -15,7 +15,7 @@ router = APIRouter(prefix="/auth", tags=["Auth"])
 
 
 class LoginSchema(BaseModel):
-    username: str
+    email: str
     password: str
 
 
@@ -25,15 +25,13 @@ class RefreshSchema(BaseModel):
 
 @router.post("/login")
 def login(data: LoginSchema, db: Session = Depends(get_db)):
-    user = authenticate_user(db, data.username, data.password)
+    user = authenticate_user(db, data.email, data.password)
 
     if not user:
         raise HTTPException(status_code=401, detail="Incorrect username or password")
-    if not user.is_active:
-        raise HTTPException(status_code=403, detail="User is inactive")
 
     access_token = create_token(
-        payload={"sub": str(user.id), "type": "access", "role": user.role},
+        payload={"sub": str(user.id), "type": "access", "roles": user.roles},
         expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES),
     )
 
@@ -47,8 +45,7 @@ def login(data: LoginSchema, db: Session = Depends(get_db)):
     return {
         "access_token": access_token,
         "refresh_token": refresh_token,
-        "token_type": "bearer",
-        "role": user.role
+        "token_type": "bearer"
     }
 
 
@@ -65,7 +62,7 @@ def refresh_token(data: RefreshSchema, db: Session = Depends(get_db)):
     if not user_id:
         raise HTTPException(status_code=401, detail="Invalid token payload")
 
-    user = db.query(User).filter(User.id == int(user_id)).first()
+    user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
 
