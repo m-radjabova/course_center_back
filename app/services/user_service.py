@@ -67,12 +67,10 @@ def update_user(db: Session, user_id: UUID, user_data: UserUpdate):
 
     update_data = user_data.model_dump(exclude_unset=True)
 
-    # email unique check
     if "email" in update_data and update_data["email"] != db_user.email:
         if check_email(db, update_data["email"]):
             raise HTTPException(status_code=400, detail="Email already registered")
 
-    # name unique check
     if "name" in update_data and update_data["name"] != db_user.name:
         if check_name(db, update_data["name"]):
             raise HTTPException(status_code=400, detail="Name already taken")
@@ -107,3 +105,10 @@ def delete_user(db: Session, user_id: UUID):
     db.delete(db_user)
     db.commit()
     return None
+
+
+def change_password(db: Session, user: User, new_password: str):
+    user.hashed_password = hash_password(new_password)
+    db.commit()
+    db.refresh(user)
+    return user

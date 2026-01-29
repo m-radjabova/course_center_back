@@ -1,0 +1,6 @@
+ROLE_USER = "user"
+ROLE_ADMIN = "admin"
+ROLE_CHEF = "chef"
+ROLE_WAITER = "waiter"
+
+ALL_ROLES = {ROLE_USER, ROLE_ADMIN, ROLE_CHEF, ROLE_WAITER}

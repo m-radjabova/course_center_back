@@ -1,8 +1,11 @@
-from fastapi import APIRouter, Depends, UploadFile, File, Form, status
+from typing import List
+from fastapi import APIRouter, Depends, Query, UploadFile, File, Form, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.schemas.product import ProductCreate, ProductUpdate, ProductOut
+from app.dependencies.auth import get_current_user
+from app.models.user import User
+from app.schemas.product import ProductCreate, ProductUpdate, ProductOut, ReviewCreate, ReviewOut, ReviewOut
 from app.services import product_service
 from app.dependencies.roles import require_admin
 
@@ -30,14 +33,34 @@ def create_product(
     return product_service.create_product(db, data, image)
 
 
-@router.get("/", response_model=list[ProductOut])
-def list_products(db: Session = Depends(get_db)):
-    return product_service.get_products(db)
+@router.post("/{product_id}/reviews")
+def add_review(
+    product_id: str,
+    data: ReviewCreate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    return product_service.create_review(db, product_id, user.id, data)
 
+
+@router.get("/", response_model=list[ProductOut])
+def list_products(
+    category_id: int | None = Query(None),
+    db: Session = Depends(get_db),
+):
+    return product_service.get_products(db, category_id=category_id)
 
 @router.get("/{product_id}", response_model=ProductOut)
 def get_product(product_id: str, db: Session = Depends(get_db)):
     return product_service.get_product(db, product_id)
+
+
+@router.get("/{product_id}/reviews", response_model=List[ReviewOut],)
+def get_reviews(
+    product_id: str,
+    db: Session = Depends(get_db),
+):
+    return product_service.get_product_reviews(db, product_id)
 
 
 @router.put("/{product_id}", response_model=ProductOut)
@@ -48,7 +71,6 @@ def update_product(
     category_id: int | None = Form(None),
     description: str | None = Form(None),
     weight: str | None = Form(None),
-    rating: int | None = Form(None),
     image: UploadFile | None = File(None),
     db: Session = Depends(get_db),
     admin=Depends(require_admin)
@@ -59,7 +81,6 @@ def update_product(
         category_id=category_id,
         description=description,
         weight=weight,
-        rating=rating
     )
     return product_service.update_product(db, product_id, data, image)
 

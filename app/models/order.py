@@ -26,6 +26,7 @@ class Order(Base):
     delivery_date = Column(DateTime, nullable=True)
 
     location = Column(JSON, nullable=True)
+    
 
     products = relationship(
         "OrderProduct",

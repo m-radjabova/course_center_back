@@ -1,34 +1,50 @@
-from pydantic import BaseModel
-from typing import Optional, List
+
+from uuid import UUID
+from pydantic import BaseModel, Field
 from datetime import datetime
 
-
-class ProductBase(BaseModel):
+class ProductCreate(BaseModel):
     name: str
-    description: Optional[str] = None
     price: int
     category_id: int
-    weight: Optional[str] = None
-
-
-class ProductCreate(ProductBase):
-    pass
-
+    description: str | None = None
+    weight: str | None = None
 
 class ProductUpdate(BaseModel):
-    name: Optional[str] = None
-    description: Optional[str] = None
-    price: Optional[int] = None
-    category_id: Optional[int] = None
-    weight: Optional[str] = None
-    rating: Optional[int] = None
+    name: str | None = None
+    price: int | None = None
+    category_id: int | None = None
+    description: str | None = None
+    weight: str | None = None
 
-
-class ProductOut(ProductBase):
+class ProductOut(BaseModel):
     id: str
-    image: Optional[str] = None
-    rating: int
+    name: str
+    description: str | None
+    price: int
+    category_id: int
+    image: str | None
+    weight: str | None
+
+    rating: float         
+    rating_count: int      
     created_at: datetime
 
     class Config:
         from_attributes = True
+
+
+class ReviewOut(BaseModel):
+    id: int
+    title: str
+    rating: int
+    user_id: UUID
+    product_id: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True 
+
+class ReviewCreate(BaseModel):
+    title: str = Field(..., max_length=255)
+    rating: int = Field(..., ge=1, le=5)

@@ -52,6 +52,20 @@ def update_user(
     return user_service.update_user(db, user_id, user_data)
 
 
+@router.patch("/{user_id}", response_model=UserOut)
+def update_password(
+    user_id: UUID,
+    new_password: str,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    user = user_service.get_user_by_id(db, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return user_service.change_password(db, user, new_password)
+
+
+
 @router.patch("/{user_id}/roles", response_model=UserOut)
 def update_roles(
     user_id: UUID,
