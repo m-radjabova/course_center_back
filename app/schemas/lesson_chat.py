@@ -8,6 +8,10 @@ class LessonChatMessageCreate(BaseModel):
     text: str = Field(..., min_length=1, max_length=3000)
 
 
+class LessonChatMessageUpdate(BaseModel):
+    text: str = Field(..., min_length=1, max_length=3000)
+
+
 class LessonChatMessageOut(BaseModel):
     id: UUID
     thread_id: UUID

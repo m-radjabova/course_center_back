@@ -172,7 +172,7 @@ def submit_assignment(
     return serialize_submission(submission)
 
 
-@router.get("/{assignment_id}/my-submission", response_model=SubmissionOut)
+@router.get("/{assignment_id}/my-submission", response_model=SubmissionOut | None)
 def get_my_submission(
     assignment_id: UUID,
     db: Session = Depends(get_db),
@@ -187,7 +187,7 @@ def get_my_submission(
         .first()
     )
     if not submission:
-        raise HTTPException(status_code=404, detail="Submission not found")
+        return None
     return serialize_submission(submission)
 
 

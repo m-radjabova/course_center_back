@@ -11,6 +11,7 @@ from app.models.user import User
 from app.schemas.lesson_chat import (
     LessonChatMessageCreate,
     LessonChatMessageOut,
+    LessonChatMessageUpdate,
     LessonChatThreadOut,
 )
 
@@ -77,6 +78,12 @@ def _serialize_thread(thread: LessonChatThread) -> dict:
         "student_username": thread.student.username if thread.student else None,
         "created_at": thread.created_at,
     }
+
+
+def _can_manage_message(message: LessonChatMessage, user: User) -> bool:
+    if _is_teacher_or_admin(user):
+        return True
+    return message.sender_id == user.id
 
 
 @router.get("/lessons/{lesson_id}/messages", response_model=list[LessonChatMessageOut])
@@ -263,6 +270,87 @@ def create_thread_message(
     )
 
     return out
+
+
+@router.patch("/messages/{message_id}", response_model=LessonChatMessageOut)
+def update_message(
+    message_id: UUID,
+    payload: LessonChatMessageUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    message = (
+        db.query(LessonChatMessage)
+        .options(
+            joinedload(LessonChatMessage.sender),
+            joinedload(LessonChatMessage.thread),
+        )
+        .filter(LessonChatMessage.id == message_id)
+        .first()
+    )
+    if not message:
+        raise HTTPException(status_code=404, detail="Message not found")
+
+    _ensure_thread_access(message.thread, current_user)
+    if not _can_manage_message(message, current_user):
+        raise HTTPException(status_code=403, detail="Permission denied")
+
+    text = payload.text.strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Message text is required")
+
+    message.text = text
+    db.commit()
+    db.refresh(message)
+    message = (
+        db.query(LessonChatMessage)
+        .options(joinedload(LessonChatMessage.sender))
+        .filter(LessonChatMessage.id == message.id)
+        .first()
+    )
+    out = _serialize_message(message)
+
+    import anyio
+    anyio.from_thread.run(
+        manager.broadcast,
+        message.thread_id,
+        {"type": "message_updated", "data": out},
+    )
+
+    return out
+
+
+@router.delete("/messages/{message_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_message(
+    message_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    message = (
+        db.query(LessonChatMessage)
+        .options(joinedload(LessonChatMessage.thread))
+        .filter(LessonChatMessage.id == message_id)
+        .first()
+    )
+    if not message:
+        raise HTTPException(status_code=404, detail="Message not found")
+
+    _ensure_thread_access(message.thread, current_user)
+    if not _can_manage_message(message, current_user):
+        raise HTTPException(status_code=403, detail="Permission denied")
+
+    thread_id = message.thread_id
+    db.delete(message)
+    db.commit()
+
+    import anyio
+    anyio.from_thread.run(
+        manager.broadcast,
+        thread_id,
+        {"type": "message_deleted", "data": {"id": str(message_id), "thread_id": str(thread_id)}},
+    )
+
+    return None
 
 
 

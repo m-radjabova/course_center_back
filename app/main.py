@@ -10,14 +10,12 @@ from app.routers.lesson_router import router as lesson_router
 from app.routers.assignments_router import router as assignments_router
 from app.routers.progress_router import router as progress_router
 from app.routers.lesson_chat_router import router as lesson_chat_router
-from app.routers.mail_router import router as mail_router
 
 app = FastAPI()
 
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 app.include_router(auth_router)
-app.include_router(mail_router)
 app.include_router(users_router)
 app.include_router(category_router)
 app.include_router(course_router)

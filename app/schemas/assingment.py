@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 class AssignmentCreate(BaseModel):
     title: str = Field(..., max_length=150)
     description: Optional[str] = None
-    order: int = 1
+    order: int = Field(default=1, ge=1)
     due_at: Optional[datetime] = None
     max_score: Optional[int] = Field(None, ge=1, le=5)
     is_required: bool = True
@@ -17,7 +17,7 @@ class AssignmentCreate(BaseModel):
 class AssignmentUpdate(BaseModel):
     title: Optional[str] = Field(None, max_length=150)
     description: Optional[str] = None
-    order: Optional[int] = None
+    order: Optional[int] = Field(None, ge=1)
     due_at: Optional[datetime] = None
     max_score: Optional[int] = Field(None, ge=1, le=5)
     is_required: Optional[bool] = None
