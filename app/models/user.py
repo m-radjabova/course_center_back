@@ -1,6 +1,5 @@
 import uuid
-from sqlalchemy import Column, String, DateTime
-from sqlalchemy.sql import func
+from sqlalchemy import Column, String, DateTime, Index, func
 from sqlalchemy.dialects.postgresql import ARRAY, UUID
 from app.core.database import Base
 
@@ -19,3 +18,7 @@ class User(Base):
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     refresh_token_hash = Column(String(255), nullable=True)
+
+    __table_args__ = (
+        Index("uq_users_email_lower", func.lower(email), unique=True),
+    )

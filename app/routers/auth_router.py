@@ -8,7 +8,7 @@ from app.core.database import get_db
 from app.core.config import settings
 from app.core.jwt import create_token, decode_token
 from app.core.security import hash_password, verify_password
-from app.services.user_service import authenticate_user, save_refresh_token_hash
+from app.services.user_service import authenticate_user, normalize_email, save_refresh_token_hash
 from app.models.user import User
 from app.dependencies.auth import get_current_user
 from app.core import firebase  
@@ -76,7 +76,7 @@ def google_login(data: GoogleAuthSchema, db: Session = Depends(get_db)):
 
     try:
         decoded_token = auth.verify_id_token(data.id_token)
-        email = decoded_token["email"]
+        email = normalize_email(decoded_token["email"])
         display_name = decoded_token.get("name")
         avatar = decoded_token.get("picture")
 

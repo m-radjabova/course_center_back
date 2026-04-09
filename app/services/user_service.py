@@ -19,6 +19,10 @@ ALLOWED_TYPES = {
 }
 
 
+def normalize_email(email: str) -> str:
+    return email.strip().lower()
+
+
 def save_image(image: UploadFile) -> str:
     if image.content_type not in ALLOWED_TYPES:
         raise HTTPException(
@@ -54,7 +58,11 @@ def update_current_user(db: Session, current_user: User, user_data: UserUpdate):
     if user_data.username is not None:
         current_user.username = user_data.username.strip()
     if user_data.email is not None:
-        current_user.email = user_data.email.strip().lower()
+        normalized_email = normalize_email(user_data.email)
+        existing_user = db.query(User).filter(User.email == normalized_email, User.id != current_user.id).first()
+        if existing_user:
+            raise HTTPException(status_code=400, detail="Email already registered")
+        current_user.email = normalized_email
 
     db.add(current_user)
     db.commit()
@@ -75,7 +83,7 @@ def update_user_avatar(db: Session, user: User, image: UploadFile):
 
 
 def check_email(db: Session, email: str) -> bool:
-    return db.query(User).filter(User.email == email).first() is not None
+    return db.query(User).filter(User.email == normalize_email(email)).first() is not None
 
 
 def check_name(db: Session, username: str) -> bool:
@@ -83,14 +91,16 @@ def check_name(db: Session, username: str) -> bool:
 
 
 def create_user(db: Session, user: UserCreate):
-    if check_email(db, user.email):
+    normalized_email = normalize_email(user.email)
+
+    if check_email(db, normalized_email):
         raise HTTPException(status_code=400, detail="Email already registered")
 
     if check_name(db, user.username):
         raise HTTPException(status_code=400, detail="Username already taken")
 
     new_user = User(
-        email=user.email,
+        email=normalized_email,
         username=user.username,
         hashed_password=hash_password(user.password),
         roles=["teacher"],
@@ -102,7 +112,8 @@ def create_user(db: Session, user: UserCreate):
 
 
 def authenticate_user(db: Session, email: str, password: str):
-    user = db.query(User).filter(User.email == email).first()
+    normalized_email = normalize_email(email)
+    user = db.query(User).filter(User.email == normalized_email).first()
     print("EMAIL KELDI:", email)
     print("USER TOPILDI:", bool(user))
     if not user:
@@ -135,8 +146,10 @@ def update_user(db: Session, user_id: UUID, user_data: UserUpdate):
     update_data = user_data.model_dump(exclude_unset=True)
 
     if "email" in update_data and update_data["email"] != db_user.email:
-        if check_email(db, update_data["email"]):
+        normalized_email = normalize_email(update_data["email"])
+        if check_email(db, normalized_email):
             raise HTTPException(status_code=400, detail="Email already registered")
+        update_data["email"] = normalized_email
 
     if "username" in update_data and update_data["username"] != db_user.username:
         if check_name(db, update_data["username"]):
