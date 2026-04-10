@@ -34,7 +34,7 @@ class Settings(BaseModel):
         [
             "http://localhost:5173",
             "http://127.0.0.1:5173",
-            "https://gameverse-front.onrender.com",
+            "https://gameverse-front.vercel.app",
         ],
     )
     AUTO_CREATE_TABLES: bool = os.getenv("AUTO_CREATE_TABLES", "").strip().lower() in {"1", "true", "yes"}
