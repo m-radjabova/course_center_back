@@ -1,72 +1,42 @@
-import sys
 import os
-from pathlib import Path
+import sys
 from logging.config import fileConfig
-from sqlalchemy import engine_from_config, pool
-from alembic import context
-from dotenv import load_dotenv 
+from pathlib import Path
 
+from alembic import context
+from dotenv import load_dotenv
+from sqlalchemy import engine_from_config, pool
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+load_dotenv(override=True)
 
-load_dotenv()
+from app.core.database import Base, get_database_url
+from app import models  # noqa: F401
 
 config = context.config
-
+config.set_main_option("sqlalchemy.url", get_database_url())
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-
-def get_env(name):
-    value = os.getenv(name)
-    return value.strip() if value is not None else None
-
-
-def get_url():
-    database_url = get_env("DATABASE_URL")
-    if database_url:
-        return database_url
-
-    required_env_vars = ["DB_USER", "DB_PASS", "DB_HOST", "DB_PORT", "DB_NAME"]
-    env_values = {name: get_env(name) for name in required_env_vars}
-    missing_env_vars = [name for name, value in env_values.items() if not value]
-    if missing_env_vars:
-        missing = ", ".join(missing_env_vars)
-        raise ValueError(
-            f"Database configuration is incomplete. Set DATABASE_URL or these env vars: {missing}"
-        )
-
-    user = env_values["DB_USER"]
-    password = env_values["DB_PASS"]
-    host = env_values["DB_HOST"]
-    port = env_values["DB_PORT"]
-    name = env_values["DB_NAME"]
-    return f"postgresql://{user}:{password}@{host}:{port}/{name}"
-
-config.set_main_option("sqlalchemy.url", get_url())
-
-from app.core.database import Base
-
-from app.models import *
-
-# from app.models.user import User
-
 target_metadata = Base.metadata
 
-def run_migrations_offline():
+
+def run_migrations_offline() -> None:
     url = config.get_main_option("sqlalchemy.url")
     context.configure(
         url=url,
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        compare_type=True,
     )
 
     with context.begin_transaction():
         context.run_migrations()
 
-def run_migrations_online():
+
+def run_migrations_online() -> None:
     connectable = engine_from_config(
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",
@@ -74,13 +44,11 @@ def run_migrations_online():
     )
 
     with connectable.connect() as connection:
-        context.configure(
-            connection=connection, 
-            target_metadata=target_metadata
-        )
+        context.configure(connection=connection, target_metadata=target_metadata, compare_type=True)
 
         with context.begin_transaction():
             context.run_migrations()
+
 
 if context.is_offline_mode():
     run_migrations_offline()

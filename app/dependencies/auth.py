@@ -1,7 +1,8 @@
-from fastapi import Depends, HTTPException
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from sqlalchemy.orm import Session
 from uuid import UUID
+
+from fastapi import Depends, HTTPException
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.jwt import decode_token
@@ -25,10 +26,10 @@ def _resolve_user_from_token(token: str | None, db: Session):
 
     try:
         user_uuid = UUID(user_id)
-    except ValueError:
-        raise HTTPException(status_code=401, detail="Invalid user id in token")
+    except ValueError as exc:
+        raise HTTPException(status_code=401, detail="Invalid user id in token") from exc
 
-    user = db.query(User).filter(User.id == user_uuid).first()
+    user = db.get(User, user_uuid)
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
 

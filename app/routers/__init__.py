@@ -1,0 +1,12 @@
+from app.routers.attendance_router import router as attendance_router
+from app.routers.auth_router import router as auth_router
+from app.routers.courses_router import router as courses_router
+from app.routers.grades_router import router as grades_router
+from app.routers.groups_router import router as groups_router
+from app.routers.lessons_router import router as lessons_router
+from app.routers.payments_router import router as payments_router
+from app.routers.rooms_router import router as rooms_router
+from app.routers.students_router import router as students_router
+from app.routers.teachers_router import router as teachers_router
+from app.routers.telegram_router import router as telegram_router
+from app.routers.users_router import router as users_router

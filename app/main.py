@@ -1,21 +1,24 @@
-import logging
-
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 
-from app.core.database import Base, engine
 from app.core.config import settings
-from app import models
-from app.routers.user_router import router as users_router
-from app.routers.auth_router import router as auth_router
-from app.routers.game_questions_router import router as game_questions_router
-from app.routers.game_feedback_router import router as game_feedback_router
-from app.routers.game_result_router import router as game_result_router
+from app.routers import (
+    attendance_router,
+    auth_router,
+    courses_router,
+    grades_router,
+    groups_router,
+    lessons_router,
+    payments_router,
+    rooms_router,
+    students_router,
+    teachers_router,
+    telegram_router,
+    users_router,
+)
+from app.services.telegram_polling import telegram_polling_runner
 
-logger = logging.getLogger(__name__)
-
-app = FastAPI()
+app = FastAPI(title="Course Center API", version="2.0.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -25,22 +28,30 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.mount("/static", StaticFiles(directory="app/static"), name="static")
+app.include_router(auth_router)
+app.include_router(users_router)
+app.include_router(teachers_router)
+app.include_router(students_router)
+app.include_router(telegram_router)
+app.include_router(courses_router)
+app.include_router(rooms_router)
+app.include_router(groups_router)
+app.include_router(lessons_router)
+app.include_router(attendance_router)
+app.include_router(grades_router)
+app.include_router(payments_router)
+
+
+@app.get("/health", tags=["Health"])
+def healthcheck():
+    return {"status": "ok"}
 
 
 @app.on_event("startup")
-def create_tables_on_startup():
-    if not settings.AUTO_CREATE_TABLES:
-        return
-
-    try:
-        Base.metadata.create_all(bind=engine)
-    except Exception:
-        logger.exception("Failed to auto-create database tables")
+async def start_telegram_polling():
+    await telegram_polling_runner.start()
 
 
-app.include_router(auth_router)
-app.include_router(users_router)
-app.include_router(game_questions_router)
-app.include_router(game_feedback_router)
-app.include_router(game_result_router)
+@app.on_event("shutdown")
+async def stop_telegram_polling():
+    await telegram_polling_runner.stop()

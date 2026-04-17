@@ -1,207 +1,164 @@
-import os
-import uuid
-import shutil
-from fastapi import HTTPException, UploadFile
-from sqlalchemy.orm import Session
-from uuid import UUID
+from __future__ import annotations
+
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session, selectinload
 
 from app.core.security import hash_password, verify_password
+from app.models.enums import UserRole
+from app.models.profile import StudentProfile, TeacherProfile
 from app.models.user import User
-from app.schemas.user import UserCreate, UserUpdate
-
-UPLOAD_DIR = "app/static/uploads/avatars"
-os.makedirs(UPLOAD_DIR, exist_ok=True)
-
-ALLOWED_TYPES = {
-    "image/jpeg": ".jpg",
-    "image/png": ".png",
-    "image/webp": ".webp",
-}
+from app.schemas.profiles import StudentProfileCreate, StudentProfileUpdate, TeacherProfileCreate, TeacherProfileUpdate
+from app.schemas.users import CurrentUserUpdate, UserCreate, UserUpdate
+from app.services.base import BaseService, parse_uuid
 
 
-def normalize_email(email: str) -> str:
-    return email.strip().lower()
-
-
-def save_image(image: UploadFile) -> str:
-    if image.content_type not in ALLOWED_TYPES:
-        raise HTTPException(
-            status_code=400,
-            detail="Only JPG, PNG, and WEBP images are allowed",
+class UserService(BaseService):
+    def list_users(self, role: UserRole | None = None) -> list[User]:
+        statement = select(User).options(
+            selectinload(User.student_profile),
+            selectinload(User.teacher_profile),
         )
+        if role:
+            statement = statement.where(User.roles.contains([role.value]))
+        statement = statement.order_by(User.created_at.desc())
+        return list(self.db.execute(statement).scalars().unique())
 
-    ext = ALLOWED_TYPES[image.content_type]
-    filename = f"{uuid.uuid4().hex}{ext}"
-    path = os.path.join(UPLOAD_DIR, filename)
+    def get_user(self, user_id: str) -> User:
+        user = self.db.execute(
+            select(User)
+            .options(selectinload(User.student_profile), selectinload(User.teacher_profile))
+            .where(User.id == parse_uuid(user_id, "user id"))
+        ).scalar_one_or_none()
+        if not user:
+            raise self.not_found("User")
+        return user
 
-    try:
-        with open(path, "wb") as f:
-            shutil.copyfileobj(image.file, f)  
-    except Exception:
-        raise HTTPException(status_code=500, detail="Failed to save image")
+    def create_user(self, payload: UserCreate) -> User:
+        email = payload.email.strip().lower()
+        self._ensure_email_available(email)
+        user = User(
+            full_name=payload.full_name.strip(),
+            phone=payload.phone,
+            email=email,
+            password_hash=hash_password(payload.password),
+            roles=payload.roles,
+            status=payload.status,
+        )
+        self.db.add(user)
+        self.commit()
+        return self.refresh(user)
 
-    return f"/static/uploads/avatars/{filename}"
+    def update_user(self, user_id: str, payload: UserUpdate) -> User:
+        user = self.get_user(user_id)
+        data = payload.model_dump(exclude_unset=True)
+        if "email" in data and data["email"]:
+            email = data["email"].strip().lower()
+            self._ensure_email_available(email, exclude_user_id=user.id)
+            user.email = email
+        if "password" in data and data["password"]:
+            user.password_hash = hash_password(data.pop("password"))
+        for field in ("full_name", "phone", "status"):
+            if field in data:
+                setattr(user, field, data[field])
+        if "roles" in data and data["roles"] is not None:
+            user.roles = data["roles"]
+        self.db.add(user)
+        self.commit()
+        return self.refresh(user)
 
+    def update_current_user(self, user: User, payload: CurrentUserUpdate) -> User:
+        data = payload.model_dump(exclude_unset=True)
+        if "email" in data and data["email"]:
+            email = data["email"].strip().lower()
+            self._ensure_email_available(email, exclude_user_id=user.id)
+            user.email = email
+        if "full_name" in data and data["full_name"] is not None:
+            user.full_name = data["full_name"].strip()
+        if "phone" in data:
+            user.phone = data["phone"]
+        self.db.add(user)
+        self.commit()
+        return self.refresh(user)
 
-def delete_old_avatar_if_exists(avatar: str | None):
-    if not avatar:
-        return
-    old_path = avatar.replace("/static/", "app/static/")
-    if os.path.exists(old_path):
-        try:
-            os.remove(old_path)
-        except Exception:
-            pass
+    def change_password(self, user: User, current_password: str, new_password: str) -> User:
+        if not verify_password(current_password, user.password_hash):
+            raise self.bad_request("Current password is incorrect")
+        if current_password == new_password:
+            raise self.bad_request("New password must be different from current password")
+        user.password_hash = hash_password(new_password)
+        self.db.add(user)
+        self.commit()
+        return self.refresh(user)
 
+    def reset_password(self, user_id: str, new_password: str) -> User:
+        user = self.get_user(user_id)
+        user.password_hash = hash_password(new_password)
+        self.db.add(user)
+        self.commit()
+        return self.refresh(user)
 
-def update_current_user(db: Session, current_user: User, user_data: UserUpdate):
-    if user_data.username is not None:
-        current_user.username = user_data.username.strip()
-    if user_data.email is not None:
-        normalized_email = normalize_email(user_data.email)
-        existing_user = db.query(User).filter(User.email == normalized_email, User.id != current_user.id).first()
-        if existing_user:
-            raise HTTPException(status_code=400, detail="Email already registered")
-        current_user.email = normalized_email
+    def create_teacher_profile(self, user_id: str, payload: TeacherProfileCreate) -> TeacherProfile:
+        user = self.get_user(user_id)
+        if UserRole.TEACHER not in user.roles:
+            raise self.bad_request("Teacher profile can only be created for users with teacher role")
+        if user.teacher_profile:
+            raise self.bad_request("Teacher profile already exists")
+        profile = TeacherProfile(user_id=user.id, **payload.model_dump())
+        self.db.add(profile)
+        self.commit()
+        return self.refresh(profile)
 
-    db.add(current_user)
-    db.commit()
-    db.refresh(current_user)
-    return current_user
+    def update_teacher_profile(self, user_id: str, payload: TeacherProfileUpdate) -> TeacherProfile:
+        user = self.get_user(user_id)
+        if not user.teacher_profile:
+            raise self.not_found("Teacher profile")
+        for field, value in payload.model_dump(exclude_unset=True).items():
+            setattr(user.teacher_profile, field, value)
+        self.db.add(user.teacher_profile)
+        self.commit()
+        return self.refresh(user.teacher_profile)
 
+    def create_student_profile(self, user_id: str, payload: StudentProfileCreate) -> StudentProfile:
+        user = self.get_user(user_id)
+        if UserRole.STUDENT not in user.roles:
+            raise self.bad_request("Student profile can only be created for users with student role")
+        if user.student_profile:
+            raise self.bad_request("Student profile already exists")
+        teacher_id = parse_uuid(payload.created_by_teacher_id, "teacher id") if payload.created_by_teacher_id else None
+        if teacher_id:
+            teacher = self.db.get(User, teacher_id)
+            if not teacher or UserRole.TEACHER not in teacher.roles:
+                raise self.bad_request("Created-by teacher not found")
+        profile = StudentProfile(
+            user_id=user.id,
+            created_by_teacher_id=teacher_id,
+            parent_name=payload.parent_name,
+            parent_phone=payload.parent_phone,
+            notes=payload.notes,
+            extra_info=payload.extra_info,
+        )
+        self.db.add(profile)
+        self.commit()
+        return self.refresh(profile)
 
+    def update_student_profile(self, user_id: str, payload: StudentProfileUpdate) -> StudentProfile:
+        user = self.get_user(user_id)
+        if not user.student_profile:
+            raise self.not_found("Student profile")
+        for field, value in payload.model_dump(exclude_unset=True).items():
+            setattr(user.student_profile, field, value)
+        self.db.add(user.student_profile)
+        self.commit()
+        return self.refresh(user.student_profile)
 
-def update_user_avatar(db: Session, user: User, image: UploadFile):
-    delete_old_avatar_if_exists(user.avatar)
-
-    avatar = save_image(image)
-    user.avatar = avatar
-
-    db.commit()
-    db.refresh(user)
-    return user
-
-
-def check_email(db: Session, email: str) -> bool:
-    return db.query(User).filter(User.email == normalize_email(email)).first() is not None
-
-
-def check_name(db: Session, username: str) -> bool:
-    return db.query(User).filter(User.username == username).first() is not None
-
-
-def create_user(db: Session, user: UserCreate):
-    normalized_email = normalize_email(user.email)
-
-    if check_email(db, normalized_email):
-        raise HTTPException(status_code=400, detail="Email already registered")
-
-    if check_name(db, user.username):
-        raise HTTPException(status_code=400, detail="Username already taken")
-
-    new_user = User(
-        email=normalized_email,
-        username=user.username,
-        hashed_password=hash_password(user.password),
-        roles=["teacher"],
-    )
-    db.add(new_user)
-    db.commit()
-    db.refresh(new_user)
-    return new_user
-
-
-def authenticate_user(db: Session, email: str, password: str):
-    normalized_email = normalize_email(email)
-    user = db.query(User).filter(User.email == normalized_email).first()
-    print("EMAIL KELDI:", email)
-    print("USER TOPILDI:", bool(user))
-    if not user:
-        return None
-    if not verify_password(password, user.hashed_password):
-        return None
-    return user
-
-
-def save_refresh_token_hash(db: Session, user: User, refresh_token_hash: str):
-    user.refresh_token_hash = refresh_token_hash
-    db.commit()
-    db.refresh(user)
-    return user
-
-
-def get_users(db: Session):
-    return db.query(User).all()
-
-
-def get_user_by_id(db: Session, user_id: UUID):
-    return db.query(User).filter(User.id == user_id).first()
-
-
-def update_user(db: Session, user_id: UUID, user_data: UserUpdate):
-    db_user = get_user_by_id(db, user_id)
-    if not db_user:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    update_data = user_data.model_dump(exclude_unset=True)
-
-    if "email" in update_data and update_data["email"] != db_user.email:
-        normalized_email = normalize_email(update_data["email"])
-        if check_email(db, normalized_email):
-            raise HTTPException(status_code=400, detail="Email already registered")
-        update_data["email"] = normalized_email
-
-    if "username" in update_data and update_data["username"] != db_user.username:
-        if check_name(db, update_data["username"]):
-            raise HTTPException(status_code=400, detail="Username already taken")
-
-    for key, value in update_data.items():
-        if key == "password":
-            db_user.hashed_password = hash_password(value)
-        else:
-            setattr(db_user, key, value)
-
-    db.commit()
-    db.refresh(db_user)
-    return db_user
-
-
-def update_user_roles(db: Session, user_id: UUID, roles: list[str]):
-    db_user = get_user_by_id(db, user_id)
-    if not db_user:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    db_user.roles = roles
-    db.commit()
-    db.refresh(db_user)
-    return db_user
+    def _ensure_email_available(self, email: str, exclude_user_id=None) -> None:
+        statement = select(User).where(func.lower(User.email) == email)
+        if exclude_user_id is not None:
+            statement = statement.where(User.id != exclude_user_id)
+        existing = self.db.execute(statement).scalar_one_or_none()
+        if existing:
+            raise self.bad_request("Email already taken")
 
 
-def delete_user(db: Session, user_id: UUID):
-    db_user = get_user_by_id(db, user_id)
-    if not db_user:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    db.delete(db_user)
-    db.commit()
-    return None
-
-
-def change_password(db: Session, user: User, new_password: str):
-    user.hashed_password = hash_password(new_password)
-    db.commit()
-    db.refresh(user)
-    return user
-
-
-def change_my_password(db: Session, user: User, current_password: str, new_password: str):
-    if not verify_password(current_password, user.hashed_password):
-        raise HTTPException(status_code=400, detail="Current password is incorrect")
-
-    if not new_password or len(new_password) < 6:
-        raise HTTPException(status_code=400, detail="New password must be at least 6 characters")
-
-    user.hashed_password = hash_password(new_password)
-    db.commit()
-    db.refresh(user)
-    return user
+def get_user_service(db: Session) -> UserService:
+    return UserService(db)

@@ -1,23 +1,92 @@
-import uuid
-from sqlalchemy import Column, String, DateTime, Index, func
-from sqlalchemy.dialects.postgresql import ARRAY, UUID
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+from sqlalchemy import Index, String, func, text
+from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
 from app.core.database import Base
+from app.models.base import TimestampMixin, UUIDPrimaryKeyMixin
+from app.models.enums import UserRole, UserStatus, sql_enum
+
+if TYPE_CHECKING:
+    from app.models.attendance import Attendance
+    from app.models.enrollment import Enrollment
+    from app.models.grade import Grade
+    from app.models.group import Group
+    from app.models.payment import Payment
+    from app.models.profile import StudentProfile, TeacherProfile
 
 
-class User(Base):
+class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "users"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    full_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    phone: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    email: Mapped[str] = mapped_column(String(255), nullable=False, unique=True, index=True)
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    roles: Mapped[list[UserRole]] = mapped_column(
+        ARRAY(sql_enum(UserRole, "user_role")),
+        nullable=False,
+        default=lambda: [UserRole.STUDENT],
+        server_default=text("ARRAY['student']::user_role[]"),
+    )
+    status: Mapped[UserStatus] = mapped_column(
+        sql_enum(UserStatus, "user_status"),
+        nullable=False,
+        default=UserStatus.ACTIVE,
+        server_default=UserStatus.ACTIVE.value,
+    )
+    refresh_token_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
-    username = Column(String(50), unique=True, nullable=False, index=True)
-    email = Column(String(100), unique=True, nullable=False, index=True)
-    avatar = Column(String, nullable=True)
-    hashed_password = Column(String(255), nullable=False)
+    teacher_profile: Mapped[TeacherProfile | None] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+        uselist=False,
+        foreign_keys="TeacherProfile.user_id",
+    )
+    student_profile: Mapped[StudentProfile | None] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+        uselist=False,
+        foreign_keys="StudentProfile.user_id",
+    )
+    teaching_groups: Mapped[list[Group]] = relationship(
+        back_populates="teacher",
+        foreign_keys="Group.teacher_id",
+    )
+    created_students: Mapped[list[StudentProfile]] = relationship(
+        back_populates="created_by_teacher",
+        foreign_keys="StudentProfile.created_by_teacher_id",
+    )
+    enrollments: Mapped[list[Enrollment]] = relationship(
+        back_populates="student",
+        foreign_keys="Enrollment.student_id",
+        cascade="all, delete-orphan",
+    )
+    attendance_records: Mapped[list[Attendance]] = relationship(
+        back_populates="student",
+        foreign_keys="Attendance.student_id",
+    )
+    grades_given: Mapped[list[Grade]] = relationship(
+        back_populates="teacher",
+        foreign_keys="Grade.teacher_id",
+    )
+    grades_received: Mapped[list[Grade]] = relationship(
+        back_populates="student",
+        foreign_keys="Grade.student_id",
+    )
+    payments: Mapped[list[Payment]] = relationship(
+        back_populates="student",
+        foreign_keys="Payment.student_id",
+    )
 
-    roles = Column(ARRAY(String), default=["teacher"], nullable=False)
+    def has_role(self, role: UserRole) -> bool:
+        return role in self.roles
 
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    refresh_token_hash = Column(String(255), nullable=True)
+    def has_any_role(self, *roles: UserRole) -> bool:
+        return any(role in self.roles for role in roles)
 
     __table_args__ = (
         Index("uq_users_email_lower", func.lower(email), unique=True),
