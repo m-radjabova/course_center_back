@@ -38,7 +38,7 @@ class Settings(BaseModel):
     CORS_ORIGINS: list[str] = _get_list_env(
         "CORS_ORIGINS",
         [
-            "http://localhost:5173",
+            "http://localhost:5173", "https://course-center-front.vercel.app"
         ],
     )
     AUTO_CREATE_TABLES: bool = os.getenv("AUTO_CREATE_TABLES", "").strip().lower() in {"1", "true", "yes"}
