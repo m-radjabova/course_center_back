@@ -1,11 +1,15 @@
 from __future__ import annotations
 
-from sqlalchemy import exists, select
+import math
+
+from typing import cast
+
+from sqlalchemy import exists, func, or_, select
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.core.security import hash_password
 from app.models.enrollment import Enrollment
-from app.models.enums import EnrollmentStatus, GroupStatus, UserRole
+from app.models.enums import EnrollmentStatus, GroupStatus, UserRole, UserStatus
 from app.models.group import Group
 from app.models.profile import StudentProfile
 from app.models.user import User
@@ -53,14 +57,80 @@ class StudentService(BaseService):
         self.commit()
         return UserService(self.db).get_user(str(user.id))
 
-    def list_students(self) -> list[User]:
+    def _student_filters(self, search: str | None = None, unassigned_only: bool = False):
+        filters = [User.roles.contains([UserRole.STUDENT.value])]
+
+        if unassigned_only:
+            filters.append(
+                ~exists(
+                    select(Enrollment.id).where(Enrollment.student_id == User.id)
+                )
+            )
+
+        cleaned_search = (search or "").strip()
+        if cleaned_search:
+            search_like = f"%{cleaned_search}%"
+            filters.append(
+                or_(
+                    User.full_name.ilike(search_like),
+                    User.email.ilike(search_like),
+                    User.phone.ilike(search_like),
+                    User.student_profile.has(StudentProfile.parent_phone.ilike(search_like)),
+                )
+            )
+
+        return filters
+
+    def list_students_paginated(
+        self,
+        page: int = 1,
+        limit: int = 20,
+        search: str | None = None,
+        unassigned_only: bool = False,
+    ) -> dict[str, int | list[User]]:
+        filters = self._student_filters(search=search, unassigned_only=unassigned_only)
+
+        total = int(
+            self.db.execute(
+                select(func.count()).select_from(User).where(*filters)
+            ).scalar_one()
+            or 0
+        )
+        active_total = int(
+            self.db.execute(
+                select(func.count())
+                .select_from(User)
+                .where(*filters, User.status == UserStatus.ACTIVE)
+            ).scalar_one()
+            or 0
+        )
+
+        pages = max(1, math.ceil(total / limit)) if limit > 0 else 1
+        safe_page = min(max(page, 1), pages)
+        offset = (safe_page - 1) * limit
+
         statement = (
             select(User)
             .options(selectinload(User.student_profile))
-            .where(User.roles.contains([UserRole.STUDENT.value]))
+            .where(*filters)
             .order_by(User.created_at.desc())
+            .offset(offset)
+            .limit(limit)
         )
-        return list(self.db.execute(statement).scalars().unique())
+        items = list(self.db.execute(statement).scalars().unique())
+
+        return {
+            "items": items,
+            "total": total,
+            "active_total": active_total,
+            "page": safe_page,
+            "limit": limit,
+            "pages": pages,
+        }
+
+    def list_students(self) -> list[User]:
+        payload = self.list_students_paginated(page=1, limit=10_000)
+        return cast(list[User], payload["items"])
 
     def list_unassigned_students(self) -> list[User]:
         statement = (
@@ -83,6 +153,9 @@ class StudentService(BaseService):
         if not student or UserRole.STUDENT not in student.roles:
             raise self.bad_request("Student not found")
         return student
+
+    def get_student(self, student_id: str) -> User:
+        return self._get_valid_student(student_id)
 
     def _get_active_group(self, group_id: str) -> Group:
         group = self.db.get(Group, parse_uuid(group_id, "group id"))

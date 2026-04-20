@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -7,7 +7,13 @@ from app.dependencies.auth import get_current_user
 from app.dependencies.roles import require_admin, require_teacher_or_admin
 from app.models.user import User
 from app.schemas.enrollments import BulkEnrollmentCreate, EnrollmentCreate, EnrollmentResponse, EnrollmentUpdate
-from app.schemas.profiles import StudentDetailResponse, StudentProfileCreate, StudentProfileResponse, StudentProfileUpdate
+from app.schemas.profiles import (
+    StudentDetailResponse,
+    StudentListResponse,
+    StudentProfileCreate,
+    StudentProfileResponse,
+    StudentProfileUpdate,
+)
 from app.schemas.users import UserCreate
 from app.services.student_service import StudentService
 from app.services.user_service import UserService
@@ -20,16 +26,31 @@ class StudentCreateRequest(BaseModel):
     profile: StudentProfileCreate
 
 
-@router.get("/", response_model=list[StudentDetailResponse])
+@router.get("/", response_model=StudentListResponse)
 def list_students(
     unassigned_only: bool = False,
+    page: int = Query(default=1, ge=1),
+    limit: int = Query(default=20, ge=1, le=10_000),
+    search: str | None = Query(default=None),
     db: Session = Depends(get_db),
     _: User = Depends(require_teacher_or_admin),
 ):
     service = StudentService(db)
-    if unassigned_only:
-        return service.list_unassigned_students()
-    return service.list_students()
+    return service.list_students_paginated(
+        page=page,
+        limit=limit,
+        search=search,
+        unassigned_only=unassigned_only,
+    )
+
+
+@router.get("/{user_id}", response_model=StudentDetailResponse)
+def get_student(
+    user_id: str,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_teacher_or_admin),
+):
+    return StudentService(db).get_student(user_id)
 
 
 @router.post("/", response_model=StudentDetailResponse, status_code=status.HTTP_201_CREATED)

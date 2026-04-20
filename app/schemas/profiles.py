@@ -61,3 +61,12 @@ class TeacherDetailResponse(UserResponse):
 
 class StudentDetailResponse(UserResponse):
     student_profile: StudentProfileResponse | None = None
+
+
+class StudentListResponse(ORMModel):
+    items: list[StudentDetailResponse]
+    total: int
+    active_total: int
+    page: int
+    limit: int
+    pages: int
