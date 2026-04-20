@@ -35,3 +35,12 @@ def update_lesson(
     current_user: User = Depends(require_teacher_or_admin),
 ):
     return LessonService(db).update_lesson(lesson_id, payload, current_user)
+
+
+@router.delete("/{lesson_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_lesson(
+    lesson_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_teacher_or_admin),
+):
+    LessonService(db).delete_lesson(lesson_id, current_user)

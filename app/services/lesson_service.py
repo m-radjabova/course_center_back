@@ -107,6 +107,11 @@ class LessonService(BaseService):
         self.commit()
         return self.get_lesson(str(lesson.id), current_user)
 
+    def delete_lesson(self, lesson_id: str, current_user: User) -> None:
+        lesson = self.get_lesson(lesson_id, current_user)
+        self.db.delete(lesson)
+        self.commit()
+
 
 def get_lesson_service(db: Session) -> LessonService:
     return LessonService(db)
