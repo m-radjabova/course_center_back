@@ -1,6 +1,9 @@
+from uuid import UUID
+
 from pydantic import Field, field_validator
 
 from app.schemas.common import ORMModel, TimestampedSchema, validate_app_email
+from app.schemas.course_centers import CourseCenterResponse
 from app.schemas.enums import UserRole, UserStatus
 
 
@@ -10,6 +13,7 @@ class UserBase(ORMModel):
     email: str
     roles: list[UserRole] = Field(min_length=1)
     status: UserStatus = UserStatus.ACTIVE
+    course_center_id: UUID | None = None
 
     @field_validator("email")
     @classmethod
@@ -36,6 +40,7 @@ class UserUpdate(ORMModel):
     password: str | None = Field(default=None, min_length=6, max_length=128)
     roles: list[UserRole] | None = Field(default=None, min_length=1)
     status: UserStatus | None = None
+    course_center_id: UUID | None = None
 
     @field_validator("email")
     @classmethod
@@ -79,6 +84,9 @@ class UserResponse(TimestampedSchema):
     phone: str | None = None
     roles: list[UserRole]
     status: UserStatus
+    course_center_id: UUID | None = None
+    course_center_name: str | None = None
+    course_center: CourseCenterResponse | None = None
 
     @field_validator("email")
     @classmethod

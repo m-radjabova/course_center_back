@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
 from app.models.enrollment import Enrollment
+from app.models.enums import UserRole
 from app.models.group import Group
 from app.models.payment import Payment
 from app.models.user import User
@@ -15,22 +16,39 @@ from app.services.telegram_service import TelegramService
 
 
 class PaymentService(BaseService):
-    def list_payments(self, student_id: str | None = None, group_id: str | None = None) -> list[Payment]:
-        statement = select(Payment).options(joinedload(Payment.student).joinedload(User.student_profile)).order_by(
-            Payment.paid_at.desc()
+    def list_payments(self, current_user: User, student_id: str | None = None, group_id: str | None = None) -> list[Payment]:
+        statement = (
+            select(Payment)
+            .options(
+                joinedload(Payment.student).joinedload(User.student_profile),
+                joinedload(Payment.group),
+            )
+            .join(Payment.group)
+            .order_by(Payment.paid_at.desc())
         )
         if student_id:
             statement = statement.where(Payment.student_id == parse_uuid(student_id, "student id"))
         if group_id:
             statement = statement.where(Payment.group_id == parse_uuid(group_id, "group id"))
+
+        if current_user.has_role(UserRole.STUDENT):
+            statement = statement.where(Payment.student_id == current_user.id)
+        elif not self.is_super_admin(current_user):
+            statement = statement.where(Group.course_center_id == current_user.course_center_id)
+            if self.is_teacher_limited(current_user):
+                statement = statement.where(Group.teacher_id == current_user.id)
+
         return list(self.db.execute(statement).scalars().unique())
 
-    def add_payment(self, payload: PaymentCreate) -> Payment:
+    def add_payment(self, payload: PaymentCreate, current_user: User) -> Payment:
         group_id = parse_uuid(payload.group_id, "group id")
         student_id = parse_uuid(payload.student_id, "student id")
         group = self.db.get(Group, group_id)
         if not group:
             raise self.bad_request("Guruh topilmadi")
+        self.ensure_same_course_center(current_user, group.course_center_id, "Guruh")
+        if self.is_teacher_limited(current_user) and group.teacher_id != current_user.id:
+            raise self.forbidden("Siz faqat o'zingizga biriktirilgan guruhlar uchun to'lov qo'sha olasiz")
         enrollment = None
         if payload.enrollment_id:
             enrollment = self.db.get(Enrollment, parse_uuid(payload.enrollment_id, "enrollment id"))
@@ -65,8 +83,11 @@ class PaymentService(BaseService):
             raise self.not_found("To'lov")
         return payment
 
-    def update_payment(self, payment_id: str, payload: PaymentUpdate) -> Payment:
+    def update_payment(self, payment_id: str, payload: PaymentUpdate, current_user: User) -> Payment:
         payment = self.get_payment(payment_id)
+        self.ensure_same_course_center(current_user, payment.group.course_center_id, "To'lov")
+        if self.is_teacher_limited(current_user) and payment.group.teacher_id != current_user.id:
+            raise self.forbidden("Siz faqat o'zingizga biriktirilgan guruhlar to'lovini yangilay olasiz")
         data = payload.model_dump(exclude_unset=True)
         if "month_for" in data and data["month_for"] is not None:
             data["month_for"] = date(data["month_for"].year, data["month_for"].month, 1)

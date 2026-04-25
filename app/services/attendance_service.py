@@ -58,7 +58,8 @@ class AttendanceService(BaseService):
         return records
 
     def _ensure_lesson_access(self, lesson: Lesson, current_user: User) -> Lesson:
-        if current_user.has_role(UserRole.TEACHER) and not current_user.has_role(UserRole.ADMIN):
+        self.ensure_same_course_center(current_user, lesson.group.course_center_id, "Dars")
+        if self.is_teacher_limited(current_user):
             group = lesson.group if hasattr(lesson, "group") else None
             teacher_id = group.teacher_id if group else None
             if teacher_id != current_user.id:

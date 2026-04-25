@@ -31,19 +31,19 @@ def create_user(
             raise HTTPException(status_code=403, detail="Public registration can only create student accounts")
         return UserService(db).create_user(payload)
 
-    if not current_user.has_any_role(UserRole.ADMIN):
+    if not current_user.has_any_role(UserRole.SUPER_ADMIN, UserRole.ADMIN):
         raise HTTPException(status_code=403, detail="Permission denied")
 
-    return UserService(db).create_user(payload)
+    return UserService(db).create_user(payload, current_user)
 
 
 @router.get("/", response_model=list[UserResponse])
 def list_users(
     role: UserRole | None = Query(default=None),
     db: Session = Depends(get_db),
-    _: User = Depends(require_admin),
+    current_user: User = Depends(require_admin),
 ):
-    return UserService(db).list_users(role)
+    return UserService(db).list_users(current_user, role)
 
 
 @router.get("/me", response_model=UserResponse)
@@ -70,10 +70,15 @@ def change_my_password(
 
 
 @router.get("/{user_id}", response_model=UserResponse)
-def get_user(user_id: str, db: Session = Depends(get_db), _: User = Depends(require_admin)):
-    return UserService(db).get_user(user_id)
+def get_user(user_id: str, db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
+    return UserService(db).get_user(user_id, current_user)
 
 
 @router.patch("/{user_id}", response_model=UserResponse)
-def update_user(user_id: str, payload: UserUpdate, db: Session = Depends(get_db), _: User = Depends(require_admin)):
-    return UserService(db).update_user(user_id, payload)
+def update_user(
+    user_id: str,
+    payload: UserUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    return UserService(db).update_user(user_id, payload, current_user)

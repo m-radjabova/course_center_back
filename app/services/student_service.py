@@ -21,7 +21,7 @@ from app.services.user_service import UserService
 
 
 class StudentService(BaseService):
-    def create_student(self, user_payload: UserCreate, profile_payload: StudentProfileCreate) -> User:
+    def create_student(self, user_payload: UserCreate, profile_payload: StudentProfileCreate, current_user: User) -> User:
         if UserRole.STUDENT not in user_payload.roles:
             raise self.bad_request("Yaratilayotgan foydalanuvchida student roli bo'lishi kerak")
 
@@ -30,7 +30,7 @@ class StudentService(BaseService):
 
         teacher_id = parse_uuid(profile_payload.created_by_teacher_id, "teacher id") if profile_payload.created_by_teacher_id else None
         if teacher_id:
-            teacher = self.db.get(User, teacher_id)
+            teacher = UserService(self.db).get_user(str(teacher_id), current_user)
             if not teacher or UserRole.TEACHER not in teacher.roles:
                 raise self.bad_request("Biriktirilgan o'qituvchi topilmadi")
 
@@ -39,6 +39,10 @@ class StudentService(BaseService):
             phone=user_payload.phone,
             email=email,
             password_hash=hash_password(user_payload.password),
+            course_center_id=UserService(self.db)._resolve_target_course_center_id(
+                user_payload.course_center_id,
+                current_user,
+            ),
             roles=user_payload.roles,
             status=user_payload.status,
         )
@@ -55,10 +59,13 @@ class StudentService(BaseService):
         )
         self.db.add(profile)
         self.commit()
-        return UserService(self.db).get_user(str(user.id))
+        return UserService(self.db).get_user(str(user.id), current_user)
 
-    def _student_filters(self, search: str | None = None, unassigned_only: bool = False):
+    def _student_filters(self, current_user: User, search: str | None = None, unassigned_only: bool = False):
         filters = [User.roles.contains([UserRole.STUDENT.value])]
+
+        if not self.is_super_admin(current_user):
+            filters.append(User.course_center_id == self.require_course_center_id(current_user))
 
         if unassigned_only:
             filters.append(
@@ -83,12 +90,13 @@ class StudentService(BaseService):
 
     def list_students_paginated(
         self,
+        current_user: User,
         page: int = 1,
         limit: int = 20,
         search: str | None = None,
         unassigned_only: bool = False,
     ) -> dict[str, int | list[User]]:
-        filters = self._student_filters(search=search, unassigned_only=unassigned_only)
+        filters = self._student_filters(current_user=current_user, search=search, unassigned_only=unassigned_only)
 
         total = int(
             self.db.execute(
@@ -111,7 +119,11 @@ class StudentService(BaseService):
 
         statement = (
             select(User)
-            .options(selectinload(User.student_profile))
+            .options(
+                selectinload(User.student_profile),
+                selectinload(User.enrollments).selectinload(Enrollment.group),
+                selectinload(User.course_center),
+            )
             .where(*filters)
             .order_by(User.created_at.desc())
             .offset(offset)
@@ -128,14 +140,18 @@ class StudentService(BaseService):
             "pages": pages,
         }
 
-    def list_students(self) -> list[User]:
-        payload = self.list_students_paginated(page=1, limit=10_000)
+    def list_students(self, current_user: User) -> list[User]:
+        payload = self.list_students_paginated(current_user=current_user, page=1, limit=10_000)
         return cast(list[User], payload["items"])
 
-    def list_unassigned_students(self) -> list[User]:
+    def list_unassigned_students(self, current_user: User) -> list[User]:
         statement = (
             select(User)
-            .options(selectinload(User.student_profile))
+            .options(
+                selectinload(User.student_profile),
+                selectinload(User.enrollments).selectinload(Enrollment.group),
+                selectinload(User.course_center),
+            )
             .where(User.roles.contains([UserRole.STUDENT.value]))
             .where(
                 ~exists(
@@ -144,35 +160,48 @@ class StudentService(BaseService):
             )
             .order_by(User.created_at.desc())
         )
+        if not self.is_super_admin(current_user):
+            statement = statement.where(User.course_center_id == self.require_course_center_id(current_user))
         return list(self.db.execute(statement).scalars().unique())
 
-    def _get_valid_student(self, student_id: str) -> User:
+    def _get_valid_student(self, student_id: str, current_user: User | None = None) -> User:
         student = self.db.execute(
-            select(User).options(selectinload(User.student_profile)).where(User.id == parse_uuid(student_id, "student id"))
+            select(User)
+            .options(
+                selectinload(User.student_profile),
+                selectinload(User.enrollments).selectinload(Enrollment.group),
+                selectinload(User.course_center),
+            )
+            .where(User.id == parse_uuid(student_id, "student id"))
         ).scalar_one_or_none()
         if not student or UserRole.STUDENT not in student.roles:
             raise self.bad_request("Student topilmadi")
+        if current_user is not None:
+            self.ensure_same_course_center(current_user, student.course_center_id, "Student")
         return student
 
-    def get_student(self, student_id: str) -> User:
-        return self._get_valid_student(student_id)
+    def get_student(self, student_id: str, current_user: User) -> User:
+        return self._get_valid_student(student_id, current_user)
 
-    def _get_active_group(self, group_id: str) -> Group:
+    def _get_active_group(self, group_id: str, current_user: User | None = None) -> Group:
         group = self.db.get(Group, parse_uuid(group_id, "group id"))
         if not group:
             raise self.bad_request("Guruh topilmadi")
         if group.status != GroupStatus.ACTIVE:
             raise self.bad_request("Faqat faol guruhlarga yangi student qo'shish mumkin")
+        if current_user is not None:
+            self.ensure_same_course_center(current_user, group.course_center_id, "Guruh")
         return group
 
     def _ensure_group_access(self, group: Group, current_user: User) -> Group:
-        if current_user.has_role(UserRole.TEACHER) and not current_user.has_role(UserRole.ADMIN) and group.teacher_id != current_user.id:
+        self.ensure_same_course_center(current_user, group.course_center_id, "Guruh")
+        if self.is_teacher_limited(current_user) and group.teacher_id != current_user.id:
             raise self.forbidden("Siz faqat o'zingizga biriktirilgan guruhlarni ko'ra olasiz")
         return group
 
-    def enroll_student(self, payload: EnrollmentCreate) -> Enrollment:
-        self._get_valid_student(str(payload.student_id))
-        self._get_active_group(str(payload.group_id))
+    def enroll_student(self, payload: EnrollmentCreate, current_user: User) -> Enrollment:
+        self._get_valid_student(str(payload.student_id), current_user)
+        self._get_active_group(str(payload.group_id), current_user)
         existing_enrollment = self.db.execute(
             select(Enrollment).where(
                 Enrollment.student_id == parse_uuid(payload.student_id, "student id"),
@@ -186,18 +215,22 @@ class StudentService(BaseService):
         self.commit()
         return self.get_enrollment(str(enrollment.id))
 
-    def bulk_enroll_students(self, payload: BulkEnrollmentCreate) -> list[Enrollment]:
-        self._get_active_group(str(payload.group_id))
+    def bulk_enroll_students(self, payload: BulkEnrollmentCreate, current_user: User) -> list[Enrollment]:
+        self._get_active_group(str(payload.group_id), current_user)
+        unique_student_ids = list(dict.fromkeys(payload.student_ids))
 
         enrollments: list[Enrollment] = []
-        for student_id in payload.student_ids:
-            self._get_valid_student(str(student_id))
+        for student_id in unique_student_ids:
+            self._get_valid_student(str(student_id), current_user)
 
-            has_any_enrollment = self.db.execute(
-                select(Enrollment.id).where(Enrollment.student_id == parse_uuid(student_id, "student id"))
+            existing_enrollment = self.db.execute(
+                select(Enrollment.id).where(
+                    Enrollment.student_id == parse_uuid(student_id, "student id"),
+                    Enrollment.group_id == parse_uuid(payload.group_id, "group id"),
+                )
             ).scalar_one_or_none()
-            if has_any_enrollment:
-                raise self.bad_request("Tanlangan studentlardan biri allaqachon guruhga biriktirilgan")
+            if existing_enrollment:
+                raise self.bad_request("Tanlangan studentlardan biri bu guruhga allaqachon biriktirilgan")
 
             enrollment = Enrollment(
                 student_id=student_id,
@@ -244,8 +277,9 @@ class StudentService(BaseService):
         )
         return list(self.db.execute(statement).scalars().unique())
 
-    def update_enrollment(self, enrollment_id: str, payload: EnrollmentUpdate) -> Enrollment:
+    def update_enrollment(self, enrollment_id: str, payload: EnrollmentUpdate, current_user: User) -> Enrollment:
         enrollment = self.get_enrollment(enrollment_id)
+        self.ensure_same_course_center(current_user, enrollment.group.course_center_id, "Ro'yxatdan o'tish")
         data = payload.model_dump(exclude_unset=True)
         if data.get("status") == EnrollmentStatus.LEFT and not data.get("left_at") and not enrollment.left_at:
             raise self.bad_request("Status chiqarilgan bo'lsa, chiqish sanasi kiritilishi shart")

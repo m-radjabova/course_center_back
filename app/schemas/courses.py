@@ -1,5 +1,6 @@
 from datetime import date
 from decimal import Decimal
+from uuid import UUID
 
 from pydantic import Field
 
@@ -31,4 +32,5 @@ class CourseUpdate(ORMModel):
 
 
 class CourseResponse(TimestampedSchema, CourseBase):
+    course_center_id: UUID
     fee_histories: list[CourseFeeHistoryResponse] = Field(default_factory=list)

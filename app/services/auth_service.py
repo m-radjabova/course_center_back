@@ -41,7 +41,12 @@ class AuthService(BaseService):
 
         return {
             "access_token": create_token(
-                payload={"sub": str(user.id), "type": "access", "roles": [role.value for role in user.roles]},
+                payload={
+                    "sub": str(user.id),
+                    "type": "access",
+                    "roles": [role.value for role in user.roles],
+                    "course_center_id": str(user.course_center_id),
+                },
                 expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES),
             ),
             "token_type": "bearer",
@@ -54,7 +59,12 @@ class AuthService(BaseService):
 
     def _build_tokens(self, user: User) -> dict:
         access_token = create_token(
-            payload={"sub": str(user.id), "type": "access", "roles": [role.value for role in user.roles]},
+            payload={
+                "sub": str(user.id),
+                "type": "access",
+                "roles": [role.value for role in user.roles],
+                "course_center_id": str(user.course_center_id),
+            },
             expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES),
         )
         refresh_token = create_token(

@@ -4,6 +4,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.security import hash_password, verify_password
+from app.models.course_center import CourseCenter
 from app.models.enums import UserRole
 from app.models.profile import StudentProfile, TeacherProfile
 from app.models.user import User
@@ -13,43 +14,94 @@ from app.services.base import BaseService, parse_uuid
 
 
 class UserService(BaseService):
-    def list_users(self, role: UserRole | None = None) -> list[User]:
-        statement = select(User).options(
+    def _user_options(self):
+        return (
             selectinload(User.student_profile),
             selectinload(User.teacher_profile),
+            selectinload(User.course_center),
         )
+
+    def _base_user_statement(self):
+        return select(User).options(*self._user_options())
+
+    def _get_course_center(self, course_center_id) -> CourseCenter:
+        course_center = self.db.get(CourseCenter, parse_uuid(course_center_id, "course center id"))
+        if not course_center:
+            raise self.bad_request("Course center topilmadi")
+        return course_center
+
+    def _get_default_course_center(self) -> CourseCenter:
+        course_center = self.db.execute(select(CourseCenter).order_by(CourseCenter.created_at.asc())).scalar_one_or_none()
+        if not course_center:
+            raise self.bad_request("Tizimda hech qanday course center mavjud emas")
+        return course_center
+
+    def _resolve_target_course_center_id(self, requested_course_center_id, current_user: User | None) -> str:
+        if requested_course_center_id:
+            target_course_center = self._get_course_center(requested_course_center_id)
+            if current_user and not self.is_super_admin(current_user):
+                self.ensure_same_course_center(current_user, target_course_center.id, "Course center")
+            return str(target_course_center.id)
+
+        if current_user and not self.is_super_admin(current_user):
+            return str(self.require_course_center_id(current_user))
+
+        return str(self._get_default_course_center().id)
+
+    def _ensure_role_assignment_allowed(
+        self,
+        target_roles: list[UserRole],
+        current_user: User | None,
+        existing_user: User | None = None,
+    ) -> None:
+        if UserRole.SUPER_ADMIN in target_roles and not (current_user and self.is_super_admin(current_user)):
+            raise self.forbidden("Super admin rolini faqat super admin bera oladi")
+
+        if UserRole.ADMIN in target_roles and current_user and not self.is_super_admin(current_user):
+            raise self.forbidden("Admin rolini faqat super admin bera oladi")
+
+        if existing_user and self.is_super_admin(existing_user) and not (current_user and self.is_super_admin(current_user)):
+            raise self.forbidden("Super admin foydalanuvchini boshqarish mumkin emas")
+
+    def list_users(self, current_user: User, role: UserRole | None = None) -> list[User]:
+        statement = self._base_user_statement()
         if role:
             statement = statement.where(User.roles.contains([role.value]))
+        if not self.is_super_admin(current_user):
+            statement = statement.where(User.course_center_id == self.require_course_center_id(current_user))
         statement = statement.order_by(User.created_at.desc())
         return list(self.db.execute(statement).scalars().unique())
 
-    def get_user(self, user_id: str) -> User:
+    def get_user(self, user_id: str, current_user: User | None = None) -> User:
         user = self.db.execute(
-            select(User)
-            .options(selectinload(User.student_profile), selectinload(User.teacher_profile))
+            self._base_user_statement()
             .where(User.id == parse_uuid(user_id, "user id"))
         ).scalar_one_or_none()
         if not user:
             raise self.not_found("Foydalanuvchi")
+        if current_user is not None:
+            self.ensure_same_course_center(current_user, user.course_center_id, "Foydalanuvchi")
         return user
 
-    def create_user(self, payload: UserCreate) -> User:
+    def create_user(self, payload: UserCreate, current_user: User | None = None) -> User:
         email = payload.email.strip().lower()
         self._ensure_email_available(email)
+        self._ensure_role_assignment_allowed(payload.roles, current_user)
         user = User(
             full_name=payload.full_name.strip(),
             phone=payload.phone,
             email=email,
             password_hash=hash_password(payload.password),
+            course_center_id=self._resolve_target_course_center_id(payload.course_center_id, current_user),
             roles=payload.roles,
             status=payload.status,
         )
         self.db.add(user)
         self.commit()
-        return self.refresh(user)
+        return self.get_user(str(user.id), current_user if current_user else user)
 
-    def update_user(self, user_id: str, payload: UserUpdate) -> User:
-        user = self.get_user(user_id)
+    def update_user(self, user_id: str, payload: UserUpdate, current_user: User) -> User:
+        user = self.get_user(user_id, current_user)
         data = payload.model_dump(exclude_unset=True)
         if "email" in data and data["email"]:
             email = data["email"].strip().lower()
@@ -61,10 +113,13 @@ class UserService(BaseService):
             if field in data:
                 setattr(user, field, data[field])
         if "roles" in data and data["roles"] is not None:
+            self._ensure_role_assignment_allowed(data["roles"], current_user, existing_user=user)
             user.roles = data["roles"]
+        if "course_center_id" in data and data["course_center_id"] is not None:
+            user.course_center_id = self._resolve_target_course_center_id(data["course_center_id"], current_user)
         self.db.add(user)
         self.commit()
-        return self.refresh(user)
+        return self.get_user(str(user.id), current_user)
 
     def update_current_user(self, user: User, payload: CurrentUserUpdate) -> User:
         data = payload.model_dump(exclude_unset=True)
@@ -90,15 +145,15 @@ class UserService(BaseService):
         self.commit()
         return self.refresh(user)
 
-    def reset_password(self, user_id: str, new_password: str) -> User:
-        user = self.get_user(user_id)
+    def reset_password(self, user_id: str, new_password: str, current_user: User) -> User:
+        user = self.get_user(user_id, current_user)
         user.password_hash = hash_password(new_password)
         self.db.add(user)
         self.commit()
-        return self.refresh(user)
+        return self.get_user(str(user.id), current_user)
 
-    def create_teacher_profile(self, user_id: str, payload: TeacherProfileCreate) -> TeacherProfile:
-        user = self.get_user(user_id)
+    def create_teacher_profile(self, user_id: str, payload: TeacherProfileCreate, current_user: User) -> TeacherProfile:
+        user = self.get_user(user_id, current_user)
         if UserRole.TEACHER not in user.roles:
             raise self.bad_request("O'qituvchi profili faqat o'qituvchi roli bor foydalanuvchi uchun yaratiladi")
         if user.teacher_profile:
@@ -108,8 +163,8 @@ class UserService(BaseService):
         self.commit()
         return self.refresh(profile)
 
-    def update_teacher_profile(self, user_id: str, payload: TeacherProfileUpdate) -> TeacherProfile:
-        user = self.get_user(user_id)
+    def update_teacher_profile(self, user_id: str, payload: TeacherProfileUpdate, current_user: User) -> TeacherProfile:
+        user = self.get_user(user_id, current_user)
         if not user.teacher_profile:
             raise self.not_found("O'qituvchi profili")
         for field, value in payload.model_dump(exclude_unset=True).items():
@@ -118,15 +173,15 @@ class UserService(BaseService):
         self.commit()
         return self.refresh(user.teacher_profile)
 
-    def create_student_profile(self, user_id: str, payload: StudentProfileCreate) -> StudentProfile:
-        user = self.get_user(user_id)
+    def create_student_profile(self, user_id: str, payload: StudentProfileCreate, current_user: User) -> StudentProfile:
+        user = self.get_user(user_id, current_user)
         if UserRole.STUDENT not in user.roles:
             raise self.bad_request("Student profili faqat student roli bor foydalanuvchi uchun yaratiladi")
         if user.student_profile:
             raise self.bad_request("Student profili allaqachon mavjud")
         teacher_id = parse_uuid(payload.created_by_teacher_id, "teacher id") if payload.created_by_teacher_id else None
         if teacher_id:
-            teacher = self.db.get(User, teacher_id)
+            teacher = self.get_user(str(teacher_id), current_user)
             if not teacher or UserRole.TEACHER not in teacher.roles:
                 raise self.bad_request("Biriktirilgan o'qituvchi topilmadi")
         profile = StudentProfile(
@@ -141,8 +196,8 @@ class UserService(BaseService):
         self.commit()
         return self.refresh(profile)
 
-    def update_student_profile(self, user_id: str, payload: StudentProfileUpdate) -> StudentProfile:
-        user = self.get_user(user_id)
+    def update_student_profile(self, user_id: str, payload: StudentProfileUpdate, current_user: User) -> StudentProfile:
+        user = self.get_user(user_id, current_user)
         if not user.student_profile:
             raise self.not_found("Student profili")
         for field, value in payload.model_dump(exclude_unset=True).items():

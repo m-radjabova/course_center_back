@@ -6,6 +6,8 @@ from fastapi import HTTPException, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.models.enums import UserRole
+
 
 class ServiceError(HTTPException):
     def __init__(self, status_code: int, detail: str):
@@ -27,6 +29,35 @@ class BaseService:
     @staticmethod
     def forbidden(message: str) -> ServiceError:
         return ServiceError(status.HTTP_403_FORBIDDEN, message)
+
+    @staticmethod
+    def is_super_admin(user) -> bool:
+        return bool(user and user.has_role(UserRole.SUPER_ADMIN))
+
+    @classmethod
+    def is_admin_level(cls, user) -> bool:
+        return bool(user and user.has_any_role(UserRole.SUPER_ADMIN, UserRole.ADMIN))
+
+    @classmethod
+    def is_teacher_limited(cls, user) -> bool:
+        return bool(user and user.has_role(UserRole.TEACHER) and not cls.is_admin_level(user))
+
+    @classmethod
+    def require_course_center_id(cls, user) -> UUID:
+        if cls.is_super_admin(user):
+            raise cls.bad_request("Super admin uchun course center konteksti alohida tanlanishi kerak")
+        if not user or not getattr(user, "course_center_id", None):
+            raise cls.forbidden("Foydalanuvchi hech qaysi course centerga biriktirilmagan")
+        return parse_uuid(user.course_center_id, "course center id")
+
+    @classmethod
+    def ensure_same_course_center(cls, current_user, entity_course_center_id, entity_name: str = "Ma'lumot") -> None:
+        if cls.is_super_admin(current_user):
+            return
+        current_center_id = cls.require_course_center_id(current_user)
+        target_center_id = parse_uuid(entity_course_center_id, "course center id")
+        if current_center_id != target_center_id:
+            raise cls.forbidden(f"{entity_name} boshqa course centerga tegishli")
 
     def commit(self):
         try:
@@ -50,6 +81,12 @@ class BaseService:
 
         if constraint_name == "rooms_name_key" or "rooms_name_key" in raw_message:
             return "Bu nomdagi xona allaqachon mavjud"
+
+        if constraint_name == "uq_rooms_course_center_name" or "uq_rooms_course_center_name" in raw_message:
+            return "Bu course center ichida shu nomdagi xona allaqachon mavjud"
+
+        if constraint_name == "uq_courses_course_center_name" or "uq_courses_course_center_name" in raw_message:
+            return "Bu course center ichida shu nomdagi kurs allaqachon mavjud"
 
         if "groups_course_id_fkey" in raw_message:
             return "Tanlangan kurs topilmadi"

@@ -1,5 +1,6 @@
 from app.routers.attendance_router import router as attendance_router
 from app.routers.auth_router import router as auth_router
+from app.routers.course_centers_router import router as course_centers_router
 from app.routers.courses_router import router as courses_router
 from app.routers.grades_router import router as grades_router
 from app.routers.groups_router import router as groups_router

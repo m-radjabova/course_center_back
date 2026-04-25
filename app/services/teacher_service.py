@@ -14,7 +14,7 @@ from app.services.user_service import UserService
 
 
 class TeacherService(BaseService):
-    def create_teacher(self, user_payload: UserCreate, profile_payload: TeacherProfileCreate) -> User:
+    def create_teacher(self, user_payload: UserCreate, profile_payload: TeacherProfileCreate, current_user: User) -> User:
         if UserRole.TEACHER not in user_payload.roles:
             raise self.bad_request("Yaratilayotgan foydalanuvchida o'qituvchi roli bo'lishi kerak")
 
@@ -26,6 +26,10 @@ class TeacherService(BaseService):
             phone=user_payload.phone,
             email=email,
             password_hash=hash_password(user_payload.password),
+            course_center_id=UserService(self.db)._resolve_target_course_center_id(
+                user_payload.course_center_id,
+                current_user,
+            ),
             roles=user_payload.roles,
             status=user_payload.status,
         )
@@ -35,15 +39,17 @@ class TeacherService(BaseService):
         profile = TeacherProfile(user_id=user.id, **profile_payload.model_dump())
         self.db.add(profile)
         self.commit()
-        return UserService(self.db).get_user(str(user.id))
+        return UserService(self.db).get_user(str(user.id), current_user)
 
-    def list_teachers(self) -> list[User]:
+    def list_teachers(self, current_user: User) -> list[User]:
         statement = (
             select(User)
-            .options(selectinload(User.teacher_profile))
+            .options(selectinload(User.teacher_profile), selectinload(User.course_center))
             .where(User.roles.contains([UserRole.TEACHER.value]))
             .order_by(User.created_at.desc())
         )
+        if not self.is_super_admin(current_user):
+            statement = statement.where(User.course_center_id == self.require_course_center_id(current_user))
         return list(self.db.execute(statement).scalars().unique())
 
 

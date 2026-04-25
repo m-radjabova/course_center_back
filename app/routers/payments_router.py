@@ -16,16 +16,25 @@ def list_payments(
     student_id: str | None = Query(default=None),
     group_id: str | None = Query(default=None),
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
-    return PaymentService(db).list_payments(student_id, group_id)
+    return PaymentService(db).list_payments(current_user, student_id, group_id)
 
 
 @router.post("/", response_model=PaymentResponse, status_code=status.HTTP_201_CREATED)
-def add_payment(payload: PaymentCreate, db: Session = Depends(get_db), _: User = Depends(require_teacher_or_admin)):
-    return PaymentService(db).add_payment(payload)
+def add_payment(
+    payload: PaymentCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_teacher_or_admin),
+):
+    return PaymentService(db).add_payment(payload, current_user)
 
 
 @router.patch("/{payment_id}", response_model=PaymentResponse)
-def update_payment(payment_id: str, payload: PaymentUpdate, db: Session = Depends(get_db), _: User = Depends(require_teacher_or_admin)):
-    return PaymentService(db).update_payment(payment_id, payload)
+def update_payment(
+    payment_id: str,
+    payload: PaymentUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_teacher_or_admin),
+):
+    return PaymentService(db).update_payment(payment_id, payload, current_user)

@@ -17,8 +17,8 @@ def list_groups(db: Session = Depends(get_db), current_user: User = Depends(get_
 
 
 @router.post("/", response_model=GroupResponse, status_code=status.HTTP_201_CREATED)
-def create_group(payload: GroupCreate, db: Session = Depends(get_db), _: User = Depends(require_admin)):
-    return GroupService(db).create_group(payload)
+def create_group(payload: GroupCreate, db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
+    return GroupService(db).create_group(payload, current_user)
 
 
 @router.get("/{group_id}", response_model=GroupResponse)
@@ -27,10 +27,15 @@ def get_group(group_id: str, db: Session = Depends(get_db), current_user: User =
 
 
 @router.patch("/{group_id}", response_model=GroupResponse)
-def update_group(group_id: str, payload: GroupUpdate, db: Session = Depends(get_db), _: User = Depends(require_admin)):
-    return GroupService(db).update_group(group_id, payload)
+def update_group(
+    group_id: str,
+    payload: GroupUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    return GroupService(db).update_group(group_id, payload, current_user)
 
 
 @router.delete("/{group_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_group(group_id: str, db: Session = Depends(get_db), _: User = Depends(require_admin)):
-    GroupService(db).delete_group(group_id)
+def delete_group(group_id: str, db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
+    GroupService(db).delete_group(group_id, current_user)

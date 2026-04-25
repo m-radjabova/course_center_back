@@ -15,7 +15,8 @@ from app.services.base import BaseService, parse_uuid
 
 class LessonService(BaseService):
     def _ensure_group_access(self, group: Group, current_user: User) -> Group:
-        if current_user.has_role(UserRole.TEACHER) and not current_user.has_role(UserRole.ADMIN) and group.teacher_id != current_user.id:
+        self.ensure_same_course_center(current_user, group.course_center_id, "Guruh")
+        if self.is_teacher_limited(current_user) and group.teacher_id != current_user.id:
             raise self.forbidden("Siz faqat o'zingizga biriktirilgan guruhlarni ko'ra olasiz")
         return group
 
@@ -52,8 +53,10 @@ class LessonService(BaseService):
                 raise self.not_found("Guruh")
             self._ensure_group_access(group, current_user)
             statement = statement.where(Lesson.group_id == group.id)
-        elif current_user.has_role(UserRole.TEACHER) and not current_user.has_role(UserRole.ADMIN):
+        elif self.is_teacher_limited(current_user):
             statement = statement.join(Lesson.group).where(Group.teacher_id == current_user.id)
+        elif not self.is_super_admin(current_user):
+            statement = statement.join(Lesson.group).where(Group.course_center_id == self.require_course_center_id(current_user))
         if year is not None:
             statement = statement.where(func.extract("year", Lesson.lesson_date) == year)
         if month is not None:

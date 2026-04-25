@@ -33,10 +33,11 @@ def list_students(
     limit: int = Query(default=20, ge=1, le=10_000),
     search: str | None = Query(default=None),
     db: Session = Depends(get_db),
-    _: User = Depends(require_teacher_or_admin),
+    current_user: User = Depends(require_teacher_or_admin),
 ):
     service = StudentService(db)
     return service.list_students_paginated(
+        current_user=current_user,
         page=page,
         limit=limit,
         search=search,
@@ -48,14 +49,18 @@ def list_students(
 def get_student(
     user_id: str,
     db: Session = Depends(get_db),
-    _: User = Depends(require_teacher_or_admin),
+    current_user: User = Depends(require_teacher_or_admin),
 ):
-    return StudentService(db).get_student(user_id)
+    return StudentService(db).get_student(user_id, current_user)
 
 
 @router.post("/", response_model=StudentDetailResponse, status_code=status.HTTP_201_CREATED)
-def create_student(payload: StudentCreateRequest, db: Session = Depends(get_db), _: User = Depends(require_teacher_or_admin)):
-    return StudentService(db).create_student(payload.user, payload.profile)
+def create_student(
+    payload: StudentCreateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_teacher_or_admin),
+):
+    return StudentService(db).create_student(payload.user, payload.profile, current_user)
 
 
 @router.post("/{user_id}/profile", response_model=StudentProfileResponse, status_code=status.HTTP_201_CREATED)
@@ -63,9 +68,9 @@ def create_student_profile(
     user_id: str,
     payload: StudentProfileCreate,
     db: Session = Depends(get_db),
-    _: User = Depends(require_teacher_or_admin),
+    current_user: User = Depends(require_teacher_or_admin),
 ):
-    return UserService(db).create_student_profile(user_id, payload)
+    return UserService(db).create_student_profile(user_id, payload, current_user)
 
 
 @router.patch("/{user_id}/profile", response_model=StudentProfileResponse)
@@ -73,9 +78,9 @@ def update_student_profile(
     user_id: str,
     payload: StudentProfileUpdate,
     db: Session = Depends(get_db),
-    _: User = Depends(require_teacher_or_admin),
+    current_user: User = Depends(require_teacher_or_admin),
 ):
-    return UserService(db).update_student_profile(user_id, payload)
+    return UserService(db).update_student_profile(user_id, payload, current_user)
 
 
 @router.get("/groups/{group_id}/enrollments", response_model=list[EnrollmentResponse])
@@ -84,17 +89,21 @@ def list_group_enrollments(group_id: str, db: Session = Depends(get_db), current
 
 
 @router.post("/enrollments", response_model=EnrollmentResponse, status_code=status.HTTP_201_CREATED)
-def enroll_student(payload: EnrollmentCreate, db: Session = Depends(get_db), _: User = Depends(require_teacher_or_admin)):
-    return StudentService(db).enroll_student(payload)
+def enroll_student(
+    payload: EnrollmentCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_teacher_or_admin),
+):
+    return StudentService(db).enroll_student(payload, current_user)
 
 
 @router.post("/enrollments/bulk", response_model=list[EnrollmentResponse], status_code=status.HTTP_201_CREATED)
 def bulk_enroll_students(
     payload: BulkEnrollmentCreate,
     db: Session = Depends(get_db),
-    _: User = Depends(require_teacher_or_admin),
+    current_user: User = Depends(require_teacher_or_admin),
 ):
-    return StudentService(db).bulk_enroll_students(payload)
+    return StudentService(db).bulk_enroll_students(payload, current_user)
 
 
 @router.patch("/enrollments/{enrollment_id}", response_model=EnrollmentResponse)
@@ -102,6 +111,6 @@ def update_enrollment(
     enrollment_id: str,
     payload: EnrollmentUpdate,
     db: Session = Depends(get_db),
-    _: User = Depends(require_teacher_or_admin),
+    current_user: User = Depends(require_teacher_or_admin),
 ):
-    return StudentService(db).update_enrollment(enrollment_id, payload)
+    return StudentService(db).update_enrollment(enrollment_id, payload, current_user)

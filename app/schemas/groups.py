@@ -43,6 +43,7 @@ class GroupUpdate(ORMModel):
 
 class GroupResponse(TimestampedSchema):
     name: str
+    course_center_id: UUID
     course_id: UUID
     teacher_id: UUID | None = None
     room_id: UUID | None = None

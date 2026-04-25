@@ -25,11 +25,13 @@ def _next_month_start(value: date | None = None) -> date:
 
 
 class CourseService(BaseService):
-    def list_courses(self) -> list[Course]:
+    def list_courses(self, current_user) -> list[Course]:
         statement = select(Course).options(selectinload(Course.fee_histories)).order_by(Course.name.asc())
+        if not self.is_super_admin(current_user):
+            statement = statement.where(Course.course_center_id == self.require_course_center_id(current_user))
         return list(self.db.execute(statement).scalars().unique())
 
-    def get_course(self, course_id: str) -> Course:
+    def get_course(self, course_id: str, current_user) -> Course:
         statement = (
             select(Course)
             .options(selectinload(Course.fee_histories))
@@ -38,13 +40,14 @@ class CourseService(BaseService):
         course = self.db.execute(statement).scalar_one_or_none()
         if not course:
             raise self.not_found("Kurs")
+        self.ensure_same_course_center(current_user, course.course_center_id, "Kurs")
         return course
 
-    def create_course(self, payload: CourseCreate) -> Course:
+    def create_course(self, payload: CourseCreate, current_user) -> Course:
         data = payload.model_dump()
         fee_effective_from = _month_start(data.pop("fee_effective_from", None))
 
-        course = Course(**data)
+        course = Course(**data, course_center_id=self.require_course_center_id(current_user))
         self.db.add(course)
         self.commit()
         self.refresh(course)
@@ -56,10 +59,10 @@ class CourseService(BaseService):
         )
         self.db.add(history)
         self.commit()
-        return self.get_course(str(course.id))
+        return self.get_course(str(course.id), current_user)
 
-    def update_course(self, course_id: str, payload: CourseUpdate) -> Course:
-        course = self.get_course(course_id)
+    def update_course(self, course_id: str, payload: CourseUpdate, current_user) -> Course:
+        course = self.get_course(course_id, current_user)
         data = payload.model_dump(exclude_unset=True)
         fee_effective_from = data.pop("fee_effective_from", None)
         new_fee = data.pop("default_monthly_fee", None)
@@ -89,40 +92,44 @@ class CourseService(BaseService):
 
         self.db.add(course)
         self.commit()
-        return self.get_course(course_id)
+        return self.get_course(course_id, current_user)
 
-    def delete_course(self, course_id: str) -> None:
-        course = self.get_course(course_id)
+    def delete_course(self, course_id: str, current_user) -> None:
+        course = self.get_course(course_id, current_user)
         self.db.delete(course)
         self.commit()
 
 
 class RoomService(BaseService):
-    def list_rooms(self) -> list[Room]:
-        return list(self.db.execute(select(Room).order_by(Room.name.asc())).scalars())
+    def list_rooms(self, current_user) -> list[Room]:
+        statement = select(Room).order_by(Room.name.asc())
+        if not self.is_super_admin(current_user):
+            statement = statement.where(Room.course_center_id == self.require_course_center_id(current_user))
+        return list(self.db.execute(statement).scalars())
 
-    def get_room(self, room_id: str) -> Room:
+    def get_room(self, room_id: str, current_user) -> Room:
         room = self.db.get(Room, parse_uuid(room_id, "room id"))
         if not room:
             raise self.not_found("Xona")
+        self.ensure_same_course_center(current_user, room.course_center_id, "Xona")
         return room
 
-    def create_room(self, payload: RoomCreate) -> Room:
-        room = Room(**payload.model_dump())
+    def create_room(self, payload: RoomCreate, current_user) -> Room:
+        room = Room(**payload.model_dump(), course_center_id=self.require_course_center_id(current_user))
         self.db.add(room)
         self.commit()
         return self.refresh(room)
 
-    def update_room(self, room_id: str, payload: RoomUpdate) -> Room:
-        room = self.get_room(room_id)
+    def update_room(self, room_id: str, payload: RoomUpdate, current_user) -> Room:
+        room = self.get_room(room_id, current_user)
         for field, value in payload.model_dump(exclude_unset=True).items():
             setattr(room, field, value)
         self.db.add(room)
         self.commit()
         return self.refresh(room)
 
-    def delete_room(self, room_id: str) -> None:
-        room = self.get_room(room_id)
+    def delete_room(self, room_id: str, current_user) -> None:
+        room = self.get_room(room_id, current_user)
         self.db.delete(room)
         self.commit()
 

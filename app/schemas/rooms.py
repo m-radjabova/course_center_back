@@ -1,3 +1,5 @@
+from uuid import UUID
+
 from pydantic import Field
 
 from app.schemas.common import ORMModel, TimestampedSchema
@@ -20,4 +22,4 @@ class RoomUpdate(ORMModel):
 
 
 class RoomResponse(TimestampedSchema, RoomBase):
-    pass
+    course_center_id: UUID

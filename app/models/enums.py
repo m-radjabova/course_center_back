@@ -18,6 +18,7 @@ def sql_enum(enum_cls: type[Enum], name: str) -> SAEnum:
 
 
 class UserRole(str, Enum):
+    SUPER_ADMIN = "super_admin"
     ADMIN = "admin"
     TEACHER = "teacher"
     STUDENT = "student"

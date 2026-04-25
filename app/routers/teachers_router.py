@@ -19,13 +19,17 @@ class TeacherCreateRequest(BaseModel):
 
 
 @router.get("/", response_model=list[TeacherDetailResponse])
-def list_teachers(db: Session = Depends(get_db), _: User = Depends(require_admin)):
-    return TeacherService(db).list_teachers()
+def list_teachers(db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
+    return TeacherService(db).list_teachers(current_user)
 
 
 @router.post("/", response_model=TeacherDetailResponse, status_code=status.HTTP_201_CREATED)
-def create_teacher(payload: TeacherCreateRequest, db: Session = Depends(get_db), _: User = Depends(require_admin)):
-    return TeacherService(db).create_teacher(payload.user, payload.profile)
+def create_teacher(
+    payload: TeacherCreateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    return TeacherService(db).create_teacher(payload.user, payload.profile, current_user)
 
 
 @router.post("/{user_id}/profile", response_model=TeacherProfileResponse, status_code=status.HTTP_201_CREATED)
@@ -33,9 +37,9 @@ def create_teacher_profile(
     user_id: str,
     payload: TeacherProfileCreate,
     db: Session = Depends(get_db),
-    _: User = Depends(require_admin),
+    current_user: User = Depends(require_admin),
 ):
-    return UserService(db).create_teacher_profile(user_id, payload)
+    return UserService(db).create_teacher_profile(user_id, payload, current_user)
 
 
 @router.patch("/{user_id}/profile", response_model=TeacherProfileResponse)
@@ -43,6 +47,6 @@ def update_teacher_profile(
     user_id: str,
     payload: TeacherProfileUpdate,
     db: Session = Depends(get_db),
-    _: User = Depends(require_admin),
+    current_user: User = Depends(require_admin),
 ):
-    return UserService(db).update_teacher_profile(user_id, payload)
+    return UserService(db).update_teacher_profile(user_id, payload, current_user)

@@ -16,7 +16,7 @@ from app.services.telegram_service import TelegramService
 class GradeService(BaseService):
     @staticmethod
     def _resolve_teacher_id(payload: GradeCreate, current_user: User):
-        if current_user.has_role(UserRole.TEACHER) and not current_user.has_role(UserRole.ADMIN):
+        if current_user.has_role(UserRole.TEACHER) and not current_user.has_any_role(UserRole.SUPER_ADMIN, UserRole.ADMIN):
             return current_user.id
         return parse_uuid(payload.teacher_id, "teacher id") if payload.teacher_id else None
 
@@ -68,7 +68,8 @@ class GradeService(BaseService):
         return grades
 
     def _ensure_lesson_access(self, lesson: Lesson, current_user: User) -> Lesson:
-        if current_user.has_role(UserRole.TEACHER) and not current_user.has_role(UserRole.ADMIN):
+        self.ensure_same_course_center(current_user, lesson.group.course_center_id, "Dars")
+        if self.is_teacher_limited(current_user):
             group = lesson.group if hasattr(lesson, "group") else None
             teacher_id = group.teacher_id if group else None
             if teacher_id != current_user.id:
@@ -91,7 +92,9 @@ class GradeService(BaseService):
         if student_id:
             statement = statement.where(Grade.student_id == parse_uuid(student_id, "student id"))
         grades = list(self.db.execute(statement).scalars().unique())
-        if current_user.has_role(UserRole.TEACHER) and not current_user.has_role(UserRole.ADMIN):
+        if not self.is_super_admin(current_user):
+            grades = [grade for grade in grades if str(grade.lesson.group.course_center_id) == str(current_user.course_center_id)]
+        if self.is_teacher_limited(current_user):
             grades = [grade for grade in grades if grade.lesson.group.teacher_id == current_user.id]
         return grades
 
@@ -108,7 +111,7 @@ class GradeService(BaseService):
         if existing:
             raise self.bad_request("Bu student uchun baho allaqachon saqlangan")
         data = payload.model_dump()
-        if current_user.has_role(UserRole.TEACHER) and not current_user.has_role(UserRole.ADMIN):
+        if self.is_teacher_limited(current_user):
             data["teacher_id"] = current_user.id
         grade = Grade(**data)
         self.db.add(grade)
@@ -138,7 +141,7 @@ class GradeService(BaseService):
         if not update_data:
             return grade
 
-        if current_user.has_role(UserRole.TEACHER) and not current_user.has_role(UserRole.ADMIN):
+        if self.is_teacher_limited(current_user):
             update_data["teacher_id"] = current_user.id
 
         for field, value in update_data.items():
@@ -195,7 +198,7 @@ class GradeService(BaseService):
                 existing.score = payload.score
                 existing.note = payload.note
                 existing.enrollment_id = parse_uuid(payload.enrollment_id, "enrollment id")
-                if current_user.has_role(UserRole.TEACHER) and not current_user.has_role(UserRole.ADMIN):
+                if self.is_teacher_limited(current_user):
                     existing.teacher_id = current_user.id
                 else:
                     existing.teacher_id = payload.teacher_id
@@ -204,7 +207,7 @@ class GradeService(BaseService):
                 continue
 
             data = payload.model_dump()
-            if current_user.has_role(UserRole.TEACHER) and not current_user.has_role(UserRole.ADMIN):
+            if self.is_teacher_limited(current_user):
                 data["teacher_id"] = current_user.id
             grade = Grade(**data)
             self.db.add(grade)

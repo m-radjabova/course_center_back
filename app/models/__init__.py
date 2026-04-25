@@ -1,4 +1,5 @@
 from app.models.attendance import Attendance
+from app.models.course_center import CourseCenter
 from app.models.course import Course, CourseFeeHistory
 from app.models.enrollment import Enrollment
 from app.models.grade import Grade
@@ -11,6 +12,7 @@ from app.models.user import User
 
 __all__ = [
     "Attendance",
+    "CourseCenter",
     "Course",
     "CourseFeeHistory",
     "Enrollment",

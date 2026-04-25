@@ -61,6 +61,8 @@ class TeacherDetailResponse(UserResponse):
 
 class StudentDetailResponse(UserResponse):
     student_profile: StudentProfileResponse | None = None
+    active_group_ids: list[UUID] = Field(default_factory=list)
+    active_group_names: list[str] = Field(default_factory=list)
 
 
 class StudentListResponse(ORMModel):
