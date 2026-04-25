@@ -34,7 +34,7 @@ class PaymentService(BaseService):
         if current_user.has_role(UserRole.STUDENT):
             statement = statement.where(Payment.student_id == current_user.id)
         elif not self.is_super_admin(current_user):
-            statement = statement.where(Group.course_center_id == current_user.course_center_id)
+            statement = statement.where(Group.course_center_id == self.require_course_center_id(current_user))
             if self.is_teacher_limited(current_user):
                 statement = statement.where(Group.teacher_id == current_user.id)
 
@@ -49,11 +49,18 @@ class PaymentService(BaseService):
         self.ensure_same_course_center(current_user, group.course_center_id, "Guruh")
         if self.is_teacher_limited(current_user) and group.teacher_id != current_user.id:
             raise self.forbidden("Siz faqat o'zingizga biriktirilgan guruhlar uchun to'lov qo'sha olasiz")
+
+        student = self.db.get(User, student_id)
+        if not student or not student.has_role(UserRole.STUDENT):
+            raise self.bad_request("Student topilmadi")
+        self.ensure_same_course_center(current_user, student.course_center_id, "Student")
+
         enrollment = None
         if payload.enrollment_id:
             enrollment = self.db.get(Enrollment, parse_uuid(payload.enrollment_id, "enrollment id"))
             if not enrollment:
                 raise self.bad_request("Ro'yxatdan o'tish ma'lumoti topilmadi")
+            self.ensure_same_course_center(current_user, enrollment.group.course_center_id, "Ro'yxatdan o'tish")
             if enrollment.group_id != group_id or enrollment.student_id != student_id:
                 raise self.bad_request("To'lov ma'lumoti ro'yxatdan o'tish ma'lumoti bilan mos kelmadi")
         payment = Payment(
