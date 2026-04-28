@@ -25,7 +25,7 @@ class GroupBase(ORMModel):
 
 
 class GroupCreate(GroupBase):
-    pass
+    course_center_id: UUID | None = None
 
 
 class GroupUpdate(ORMModel):

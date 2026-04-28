@@ -10,6 +10,7 @@ from app.models.room import Room
 from app.models.user import User
 from app.schemas.groups import GroupCreate, GroupUpdate
 from app.services.base import BaseService, parse_uuid
+from app.services.user_service import UserService
 
 
 class GroupService(BaseService):
@@ -43,9 +44,19 @@ class GroupService(BaseService):
         return group
 
     def create_group(self, payload: GroupCreate, current_user: User) -> Group:
-        course_center_id = self.require_course_center_id(current_user)
-        self._validate_group_refs(payload.course_id, payload.teacher_id, payload.room_id, current_user=current_user)
-        group = Group(**payload.model_dump(), course_center_id=course_center_id)
+        course_center_id = UserService(self.db)._resolve_target_course_center_id(
+            payload.course_center_id,
+            current_user,
+        )
+        self._validate_group_refs(
+            payload.course_id,
+            payload.teacher_id,
+            payload.room_id,
+            current_user=current_user,
+            target_course_center_id=course_center_id,
+        )
+        group_data = payload.model_dump(exclude={"course_center_id"})
+        group = Group(**group_data, course_center_id=course_center_id)
         self.db.add(group)
         self.commit()
         return self._get_group_record(str(group.id))
@@ -71,12 +82,25 @@ class GroupService(BaseService):
         self.db.delete(group)
         self.commit()
 
-    def _validate_group_refs(self, course_id, teacher_id, room_id, current_user: User, partial: bool = False) -> None:
+    def _validate_group_refs(
+        self,
+        course_id,
+        teacher_id,
+        room_id,
+        current_user: User,
+        partial: bool = False,
+        target_course_center_id=None,
+    ) -> None:
+        enforce_current_user_scope = not self.is_super_admin(current_user)
+
         if course_id is not None:
             course = self.db.get(Course, parse_uuid(course_id, "course id"))
             if not course:
                 raise self.bad_request("Kurs topilmadi")
-            self.ensure_same_course_center(current_user, course.course_center_id, "Kurs")
+            if target_course_center_id is not None and str(course.course_center_id) != str(target_course_center_id):
+                raise self.bad_request("Tanlangan kurs boshqa course centerga tegishli")
+            if enforce_current_user_scope:
+                self.ensure_same_course_center(current_user, course.course_center_id, "Kurs")
         elif not partial:
             raise self.bad_request("Kurs tanlanishi shart")
 
@@ -84,13 +108,19 @@ class GroupService(BaseService):
             teacher = self.db.get(User, parse_uuid(teacher_id, "teacher id"))
             if not teacher or UserRole.TEACHER not in teacher.roles:
                 raise self.bad_request("O'qituvchi topilmadi")
-            self.ensure_same_course_center(current_user, teacher.course_center_id, "O'qituvchi")
+            if target_course_center_id is not None and str(teacher.course_center_id) != str(target_course_center_id):
+                raise self.bad_request("Tanlangan o'qituvchi boshqa course centerga tegishli")
+            if enforce_current_user_scope:
+                self.ensure_same_course_center(current_user, teacher.course_center_id, "O'qituvchi")
 
         if room_id is not None:
             room = self.db.get(Room, parse_uuid(room_id, "room id"))
             if not room:
                 raise self.bad_request("Xona topilmadi")
-            self.ensure_same_course_center(current_user, room.course_center_id, "Xona")
+            if target_course_center_id is not None and str(room.course_center_id) != str(target_course_center_id):
+                raise self.bad_request("Tanlangan xona boshqa course centerga tegishli")
+            if enforce_current_user_scope:
+                self.ensure_same_course_center(current_user, room.course_center_id, "Xona")
 
 
 def get_group_service(db: Session) -> GroupService:

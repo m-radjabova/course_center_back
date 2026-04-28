@@ -31,7 +31,9 @@ class UserService(BaseService):
         return course_center
 
     def _get_default_course_center(self) -> CourseCenter:
-        course_center = self.db.execute(select(CourseCenter).order_by(CourseCenter.created_at.asc())).scalar_one_or_none()
+        course_center = self.db.execute(
+            select(CourseCenter).order_by(CourseCenter.created_at.asc()).limit(1)
+        ).scalar_one_or_none()
         if not course_center:
             raise self.bad_request("Tizimda hech qanday course center mavjud emas")
         return course_center

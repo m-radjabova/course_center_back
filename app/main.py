@@ -19,7 +19,6 @@ from app.routers import (
 )
 from app.services.telegram_polling import telegram_polling_runner
 
-
 app = FastAPI(title="Course Center API", version="2.0.0")
 
 app.add_middleware(
