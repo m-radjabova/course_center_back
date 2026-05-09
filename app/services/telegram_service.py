@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from datetime import datetime, timezone, timedelta
 from secrets import token_urlsafe
@@ -37,6 +38,8 @@ TELEGRAM_MENU_KEYBOARD = {
     "resize_keyboard": True,
     "is_persistent": True,
 }
+
+logger = logging.getLogger(__name__)
 
 
 class TelegramService(BaseService):
@@ -338,6 +341,19 @@ class TelegramService(BaseService):
         if reply_markup is not None:
             payload["reply_markup"] = reply_markup
         self._post_to_telegram("sendMessage", payload)
+
+    def _send_message_safely(
+        self,
+        chat_id: str,
+        text: str,
+        reply_markup: dict | None = None,
+        parse_mode: str | None = "Markdown",
+    ) -> None:
+        try:
+            self.send_message(chat_id, text, reply_markup, parse_mode)
+        except Exception as exc:
+            # Telegram xatolari biznes jarayonni (davomat/baho/to'lov saqlashni) yiqitmasin.
+            logger.warning("Telegram notification failed for chat_id=%s: %s", chat_id, exc)
 
     def set_webhook(self, public_base_url: str) -> dict:
         self._raise_if_disabled()
@@ -721,7 +737,7 @@ class TelegramService(BaseService):
             grade.note,
             "Ustoz tomonidan qo'shimcha izoh qoldirilmagan.",
         )
-        self.send_message(
+        self._send_message_safely(
             student.student_profile.telegram_chat_id,
             (
                 "🏆⭐ *Sizning bahoyingiz yangilandi!*\n\n"
@@ -746,7 +762,7 @@ class TelegramService(BaseService):
         ).scalar_one_or_none()
         if not student or not student.student_profile or not student.student_profile.telegram_chat_id:
             return
-        self.send_message(
+        self._send_message_safely(
             student.student_profile.telegram_chat_id,
             (
                 "💳 *To'lovingiz muvaffaqiyatli kiritildi!*\n\n"
@@ -779,7 +795,7 @@ class TelegramService(BaseService):
             attendance.note,
             "Davomat bo'yicha qo'shimcha izoh qoldirilmagan.",
         )
-        self.send_message(
+        self._send_message_safely(
             student.student_profile.telegram_chat_id,
             (
                 "📍 *Sizning davomatingiz yangilandi!*\n\n"
